@@ -10,7 +10,8 @@
  *   npx cache-cash recheck         baseline comparison
  *
  *   --days N (90) · --project <path> · --price <model=$/MTok,...> · --yes ·
- *   --no-color · --all-time · --json · --md · --compact · --explain
+ *   --no-color · --all-time · --json · --md · --compact · --explain ·
+ *   --version · --help
  *
  * Exit codes: 0 ok · 1 no transcripts found · 2 parse/internal error.
  * `--json` never prompts.
@@ -21,6 +22,7 @@
  */
 
 import { createInterface } from "node:readline";
+import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { run } from "./pipeline.js";
 import { parsePriceOverride } from "./pricing.js";
@@ -65,6 +67,33 @@ interface Args {
 }
 
 const SUBCOMMANDS = new Set<Subcommand>(["card", "enable", "revert", "verify", "recheck"]);
+
+const HELP_TEXT = `cache-cash - a cache doctor for Claude Code
+
+Usage
+  npx cache-cash                 full checkup
+  npx cache-cash card            score box + top Wrapped line
+  npx cache-cash enable          confirmed 1h-TTL enable flow
+  npx cache-cash revert          confirmed 5m-TTL revert flow
+  npx cache-cash verify          post-enable TTL check
+  npx cache-cash recheck         baseline comparison
+
+Flags
+  --days <n>                 analysis window in days (default 90)
+  --all-time                 the whole corpus, ignoring --days
+  --project <path>           one project directory only
+  --price <model=$/MTok,...> per-model price overrides
+  --yes, -y                  skip the confirmation prompt
+  --json                     machine-readable summary; never prompts
+  --md                       markdown report
+  --compact                  the short version
+  --explain                  the formulas, with your numbers filled in
+  --no-color                 strip ANSI color
+  --version                  print the version and exit
+  --help                     this
+
+Exit codes: 0 ok, 1 no transcripts found, 2 parse/internal error
+`;
 
 function parseArgs(argv: string[]): Args {
   const args: Args = {
@@ -179,7 +208,24 @@ function promptBranch(): Promise<Branch> {
 // ------------------------------------------------------------------ main
 
 async function main(): Promise<number> {
-  const args = parseArgs(process.argv.slice(2));
+  const rawArgv = process.argv.slice(2);
+
+  // --version / --help short-circuit everything else, at any argv position
+  // (e.g. `cache-cash card --help`) — they must answer with no transcripts,
+  // no HOME, and no TTY required, since that's what a fresh `npx cache-cash
+  // --version` on a random machine looks like. --version wins when both are
+  // present.
+  if (rawArgv.includes("--version")) {
+    const pkg = createRequire(import.meta.url)("../package.json") as { version: string };
+    process.stdout.write(pkg.version + "\n");
+    return 0;
+  }
+  if (rawArgv.includes("--help")) {
+    process.stdout.write(HELP_TEXT);
+    return 0;
+  }
+
+  const args = parseArgs(rawArgv);
   const tty = isInteractiveTty(args);
   const color = useColor(args, tty);
   const ink = makeInk(color);

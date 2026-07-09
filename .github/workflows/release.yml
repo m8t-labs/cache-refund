@@ -100,17 +100,15 @@ jobs:
           mkdir consumer && cd consumer
           npm init -y >/dev/null
           npm install "cache-cash@${DIST_TAG}"
-          # A runner has no ~/.claude/projects; the correct behavior is a
-          # clean exit code 1 with the no-transcripts message. That proves
-          # the bin resolves, node >=18 runs it, and the guard path works.
-          set +e
-          out="$(npx cache-cash --json 2>&1)"
-          code=$?
-          set -e
-          echo "$out"
-          if [ "$code" = "1" ] && echo "$out" | grep -q "No transcripts"; then
-            echo "cache-cash CLI OK (clean no-transcripts exit)"
+          # --version answers with no transcripts, no HOME, no TTY: exit 0
+          # plus a semver proves the bin resolves and node >=18 runs it. No
+          # equality check against the just-published version — the
+          # registry's dist-tag can lag for a moment after publish.
+          out="$(npx cache-cash --version)"
+          echo "installed cache-cash $out"
+          if echo "$out" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+'; then
+            echo "cache-cash CLI OK (--version exits 0)"
           else
-            echo "unexpected exit $code" >&2
+            echo "unexpected --version output: $out" >&2
             exit 1
           fi
