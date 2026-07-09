@@ -15,17 +15,17 @@ cache TTL would save you money and enables it with one confirmation.
 |                      cache-cash                       |
 |                                                       |
 |                 YOUR 1H CACHE RECEIPT                 |
-|         saved ~$2,506.47-eq vs 5m (last 90d)          |
+|         saved ~$2,517.98-eq vs 5m (last 90d)          |
 |                                                       |
 |             efficiency score: 98.5 / 100              |
 +-------------------------------------------------------+
 
-  > Model switches invalidated 70.3M tokens of cache ($513.86).
+  > Model switches invalidated 68.9M tokens of cache ($505.56-eq).
 
 share: npx cache-cash --compact  -  #cachecash
 ```
 
-<sub>`npx cache-cash card` on the author's real 590-session corpus (subscription branch — a subscriber's cache is already on 1h, so this is a receipt, not a recommendation). On a real terminal the box is drawn with Unicode; the ASCII form above is what pastes cleanly into a code block. Your numbers are your own.</sub>
+<sub>`npx cache-cash card` on the author's real 591-session corpus (subscription branch — a subscriber's cache is already on 1h, so this is a receipt, not a recommendation). On a real terminal the box is drawn with Unicode; the ASCII form above is what pastes cleanly into a code block. Your numbers are your own.</sub>
 
 ```bash
 npx cache-cash

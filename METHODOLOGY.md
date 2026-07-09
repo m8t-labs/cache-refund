@@ -145,7 +145,7 @@ tail = min( median(warm-turn creation in this session),  creation )
 
 This is the model's **one and only approximation**. It is bounded above by the
 warm-median, so it is small relative to the recoverable creation it replaces
-(on the author's corpus the total tail term is `$39.30` against a 5m write cost
+(on the author's corpus the total tail term is `$39.23` against a 5m write cost
 of thousands — the parity test asserts it stays under 5% of 5m write cost).
 
 ## 5. Relationship to the oracle (the exact identity)
@@ -294,8 +294,8 @@ Session warm-median = median{400k} = 400k.
 The **sign-flip** case is the `regime-1h.jsonl` fixture (the subscriber shape):
 a recoverable turn served as a pure read (creation 0, read 1.2M) gives
 cost5m $17.275 vs cost1h $16.00 ⇒ **delta −$1.275**, i.e. 1h cheaper. That is the
-shape of the author's real corpus, where the symmetric delta is **−$2,506.47**
-(1h cheaper) over 84.1 analyzed days while the naive creation-only oracle would
+shape of the author's real corpus, where the symmetric delta is **−$2,517.98**
+(1h cheaper) over 84.3 analyzed days while the naive creation-only oracle would
 have reported 1h as *more* expensive.
 
 ## 11. Two delta fields — do not mix them
@@ -303,10 +303,10 @@ have reported 1h as *more* expensive.
 `--json` exposes both, and conflating them is how a wrong-number argument starts:
 
 - **`counterfactual.delta1hMinus5m`** — the delta over the **analyzed window**
-  (e.g. "saved ~$2,506.47 vs 5m in the last 90 days"). This is what the receipt
+  (e.g. "saved ~$2,517.98 vs 5m in the last 90 days"). This is what the receipt
   headline and the card show, always labeled with its window.
 - **`counterfactual.delta30d`** — the same delta **normalized to a rolling 30
-  days** (`delta / spanDays · 30`, here −$894.32 over an 84.1-day span). This is
+  days** (`delta / spanDays · 30`, here −$895.84 over an 84.3-day span). This is
   what the recommendation line uses ("saves ~$X per 30d").
 
 The receipt/card figure is **never** labeled "/30d"; the "/30d" label belongs
