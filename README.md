@@ -130,13 +130,12 @@ cache writes to 5-minute for a stretch — settings said 1h, transcripts billed
 5m. Anyone reasoning from their *config* rather than their *transcripts* was
 quietly wrong for weeks.
 
-The sharpest illustration is
-a community backtest effort: a
-serious effort that modeled cache-keepalive strategies against an *assumed* TTL.
-When it was finally checked against real billed tokens, **six carefully-modeled
-strategies all lost to a one-line heuristic** — and part of the modeling had
-rested on a TTL that the server wasn't actually honoring. The lesson `cache-cash`
-takes from it: **measure the TTL you received, don't trust the one you set.**
+The sharpest illustration we know of: a serious community effort once modeled
+cache-keepalive strategies against an *assumed* TTL. When the models were
+finally checked against real billed tokens, **six carefully-modeled strategies
+all lost to a one-line heuristic** — and part of the modeling had rested on a
+TTL that the server wasn't actually honoring. The lesson `cache-cash`
+takes from that story: **measure the TTL you received, don't trust the one you set.**
 That is why every checkup leads with the reality-check line, and why the
 regression *watchdog* (below) is the roadmap's flagship.
 
@@ -210,13 +209,13 @@ settings-opinion tips are never product.
 
 ## Relationship to spend dashboards
 
-Spend dashboards reports what you **spent** — it
-is the dashboard. `cache-cash` reports what you **wasted, why, and the fix** — it
-is the decision. They compose: watch your spend with spend dashboards, then run
-`cache-cash` when you want to know whether the cache defaults are costing you and
-what to change. (The cache-write pricing here is cross-validated against
-community-corrected 1h pricing data) /
-community-corrected pricing data)
+Spend dashboards report what you **spent**. `cache-cash` reports what you
+**wasted, why, and the fix** — it is the decision, not the dashboard. They
+compose: watch your spend wherever you already watch it, then run `cache-cash`
+when you want to know whether the cache defaults are costing you and what to
+change. (The per-TTL write pricing here comes from Anthropic's published
+per-model rates, re-derived in [METHODOLOGY.md](./METHODOLOGY.md) with the
+retrieval date cited in `src/pricing.ts`.)
 
 ## Contributing & license
 

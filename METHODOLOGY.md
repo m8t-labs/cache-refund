@@ -318,16 +318,18 @@ only to `delta30d`.
   `ENABLE_PROMPT_CACHING_1H` is API-only" branch rules are Anthropic's
   documented behavior (`code.claude.com/docs/en/prompt-caching`,
   `platform.claude.com` pricing).
-- **response-header measurements.** The received-TTL split is
-  independently observable in the response headers, matching the
-  `ephemeral_{5m,1h}` transcript fields the reality check reads.
-- **community backtests** .
-  Empirical precedent for **threshold-over-simulation**: six modeled cache
-  strategies all lost to a one-line heuristic when checked against real billed
-  tokens. `cache-cash` ships the threshold (39.47%) and defers the full simulator
-  to v2 for exactly this reason.
-- **spend dashboards** corrected 1h math (community-corrected pricing data) — the write-pricing is
-  cross-validated against their fix.
+- **Response-header cross-check.** The received-TTL split is independently
+  observable in API response headers, matching the `ephemeral_{5m,1h}`
+  transcript fields the reality check reads.
+- **Threshold-over-simulation, empirically.** Community backtests of modeled
+  cache strategies against real billed tokens have shown simple threshold
+  policies beating fitted models on bursty human arrival patterns — in one such
+  backtest, six modeled strategies all lost to a one-line heuristic.
+  `cache-cash` ships the threshold (39.47%) and defers the full simulator to v2
+  for exactly this reason.
+- **Published pricing, re-derived.** The per-TTL write multipliers (1.25× / 2×)
+  and the 0.1× read rate come from Anthropic's published pricing tables and are
+  re-derived per model in `src/pricing.ts` (URL + retrieval date cited there).
 
 ## 13. "Backtested against N weeks of real usage"
 

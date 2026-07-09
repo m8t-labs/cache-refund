@@ -14,7 +14,7 @@ body:
     attributes:
       label: What number looked wrong, and what did you expect?
       description: Which figure (e.g. the counterfactual delta, a leak row, the score) and why you think it's off.
-      placeholder: "The receipt said 'saved ~$2,506 vs 5m' but spend dashboards shows my total spend was only $X, so ..."
+      placeholder: "The receipt said 'saved ~$2,506 vs 5m' but my spend dashboard shows my total spend was only $X, so ..."
     validations:
       required: true
   - type: textarea
