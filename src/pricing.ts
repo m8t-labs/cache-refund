@@ -4,7 +4,8 @@
  * Base input $/MTok values verified against Anthropic's live pricing docs:
  *   https://platform.claude.com/docs/en/about-claude/pricing
  *   Fetched 2026-07-09. The cache multipliers below are stated on that same
- *   page ("Prompt caching" section) and are pinned:
+ *   page ("Prompt caching" section) and are pinned; do not change without
+ *   re-verifying against the pricing page:
  *     5-minute cache write = 1.25x base input
  *     1-hour   cache write = 2.00x base input
  *     cache read (hit)     = 0.10x base input
@@ -19,7 +20,7 @@
  *   Claude Haiku 3.5 (legacy) ................ $0.80
  *
  * We price by the CURRENT list rate a user would pay today. For $-equivalent
- * subscriber framing we still use these API list rates (a locked design choice).
+ * subscriber framing we still use these API list rates.
  */
 
 export const MULT_5M_WRITE = 1.25;

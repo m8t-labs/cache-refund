@@ -1,7 +1,7 @@
 /**
  * Branch detection + TTL reality check + Summary assembly.
  *
- * Branch detection inputs (the design):
+ * Branch detection inputs:
  *   - ~/.claude/settings.json env: ENABLE_PROMPT_CACHING_1H, FORCE_PROMPT_CACHING_5M
  *   - provider hints: CLAUDE_CODE_USE_BEDROCK / _USE_VERTEX, ANTHROPIC_API_KEY
  *   - per-period 1h/5m creation split from transcripts (the regime)
@@ -167,21 +167,21 @@ export interface BuildSummaryInput {
   jsonMode: boolean;
   ctx?: PriceCtx;
   /**
-   * the renderer contracts addition (additive, backward-compatible): when the CLI has
-   * already resolved an "ambiguous" branch via its one interactive question
-   * ("subscription or API?"), it passes the user's confirmed answer here so
-   * buildSummary skips detectBranch's guess entirely. Branch detection logic
-   * itself stays owned by verdict.ts (this file) — the CLI never re-derives
-   * it, it only supplies the human's direct answer when the analyzer itself
-   * couldn't decide. Undefined (the default) preserves all existing
-   * detectBranch behavior byte-for-byte.
+   * Additive, backward-compatible field: when the CLI has already resolved
+   * an "ambiguous" branch via its one interactive question ("subscription or
+   * API?"), it passes the user's confirmed answer here so buildSummary skips
+   * detectBranch's guess entirely. Branch detection logic itself stays owned
+   * by verdict.ts (this file) — the CLI never re-derives it, it only
+   * supplies the human's direct answer when the analyzer itself couldn't
+   * decide. Undefined (the default) preserves all existing detectBranch
+   * behavior byte-for-byte.
    */
   branchOverride?: Branch;
 }
 
 const DAY_S = 86400;
 
-/** Assemble the full the contract Summary from analysis + env. */
+/** Assemble the full Summary from analysis + env. */
 export function buildSummary(input: BuildSummaryInput): Summary {
   const { events, agg, windowMode, windowDays, project, hints, jsonMode } = input;
   const ctx = input.ctx ?? {};

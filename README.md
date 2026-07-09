@@ -202,7 +202,7 @@ formula.
   command yet.
 - **v1.5 — `team`** aggregate mode (v1 already ships `--json` + a documented `jq`
   merge for fleets).
-- **v2 — a policy simulator** behind the same internal contracts: price
+- **v2 — a policy simulator** behind the same cost model: price
   `5m+keepalive` and `1h+keepalive` for API users.
 
 The roadmap has one rule (see [METHODOLOGY.md](./METHODOLOGY.md) and

@@ -1,21 +1,21 @@
 #!/usr/bin/env node
 /**
- * The full the contract CLI surface. Replaces the analyzer's --json-only stub.
+ * The full CLI surface.
  *
- *   npx cache-cash                 full multi-section checkup
- *   npx cache-cash card            section box + top Wrapped line
- *   npx cache-cash enable          confirmed 1h-TTL enable flow (the contract stub for now)
- *   npx cache-cash revert          confirmed 5m-TTL revert flow (the contract stub for now)
- *   npx cache-cash verify          post-enable TTL check (the contract stub for now)
- *   npx cache-cash recheck         baseline comparison (the contract stub for now)
+ *   npx cache-cash                 full checkup
+ *   npx cache-cash card            score box + top Wrapped line
+ *   npx cache-cash enable          confirmed 1h-TTL enable flow
+ *   npx cache-cash revert          confirmed 5m-TTL revert flow
+ *   npx cache-cash verify          post-enable TTL check
+ *   npx cache-cash recheck         baseline comparison
  *
  *   --days N (90) · --project <path> · --price <model=$/MTok,...> · --yes ·
  *   --no-color · --all-time · --json · --md · --compact · --explain
  *
  * Exit codes: 0 ok · 1 no transcripts found · 2 parse/internal error.
- * `--json` never prompts (the contract law).
+ * `--json` never prompts.
  *
- * TTY-ness is decided ONCE, here, up front (module contract) and threaded through every
+ * TTY-ness is decided ONCE, here, up front, and threaded through every
  * render call as `opts.tty` — render.ts and format.ts never call
  * process.stdout.isTTY themselves.
  */
@@ -130,9 +130,9 @@ function parseArgs(argv: string[]): Args {
 // -------------------------------------------------------------------- tty
 
 /**
- * TTY-ness, decided once (module contract). Non-TTY (piped, redirected), CI=1, --no-color,
+ * TTY-ness, decided once. Non-TTY (piped, redirected), CI=1, --no-color,
  * or --json all force the plain/non-interactive path. `--json` additionally
- * never prompts, per S3.
+ * never prompts.
  */
 function isInteractiveTty(args: Args): boolean {
   if (args.json) return false;
@@ -160,7 +160,7 @@ function promptYesNo(question: string): Promise<boolean> {
   });
 }
 
-/** The one interactive branch-ambiguity question (the design: "subscription or API/Bedrock/Vertex?"). */
+/** The one interactive branch-ambiguity question: "subscription or API/Bedrock/Vertex?". */
 function promptBranch(): Promise<Branch> {
   return new Promise((resolve) => {
     const rl = createInterface({ input: process.stdin, output: process.stdout });
@@ -183,27 +183,28 @@ async function main(): Promise<number> {
   const tty = isInteractiveTty(args);
   const color = useColor(args, tty);
   const ink = makeInk(color);
-  // ascii-ness tracks TTY-ness only (S5: non-TTY/CI -> ASCII), never
-  // --no-color on its own — --no-color strips color but keeps Unicode box
-  // chars on a real TTY, per RenderOptions.noColor's "independent of TTY" doc.
+  // ascii-ness tracks TTY-ness only (non-TTY/CI -> ASCII), never --no-color
+  // on its own — --no-color strips color but keeps Unicode box chars on a
+  // real TTY, per RenderOptions.noColor's "independent of TTY" doc.
   const sym = makeSym(!tty);
 
-  // fix (follow-up): enable/revert are first-class subcommands
-  // and must work in a HOME with zero transcripts — the settings edit needs
-  // no Summary. Route them BEFORE the analysis pipeline. --json is exempt:
-  // `cache-cash enable --json` is a Summary dump and never writes (module contract), so
-  // it keeps the pipeline path below. verify/recheck DO need transcripts
-  // (they analyze them) and keep their pipeline dependency unchanged.
+  // enable/revert are first-class subcommands and must work in a HOME with
+  // zero transcripts — the settings edit needs no Summary. Route them BEFORE
+  // the analysis pipeline. --json is exempt: `cache-cash enable --json` is a
+  // Summary dump and never writes, so it keeps the pipeline path below.
+  // verify/recheck DO need transcripts (they analyze them) and keep their
+  // pipeline dependency unchanged.
   if (!args.json && (args.subcommand === "enable" || args.subcommand === "revert")) {
     return await runStandaloneAction(args);
   }
 
-  // Live per-project scan counter (section, TTY only) needs the run to report
-  // progress; run() itself is a single async call (no progress callback in
-  // S2), so on huge corpora (~4s/21.7k files per the analyzer notes) we print the
-  // trust line + a one-shot loading pun immediately, then the real result
-  // once run() resolves. This satisfies "the wait is part of the demo"
-  // without needing a progress callback contracts into the analyzer's pipeline.
+  // Live per-project scan counter (trust line, TTY only) needs the run to
+  // report progress; run() itself is a single async call (no progress
+  // callback in the Summary schema), so on huge corpora (measured ~4s over
+  // 21.7k files) we print the trust line + a one-shot loading pun
+  // immediately, then the real result once run() resolves. This satisfies
+  // "the wait is part of the demo" without needing a progress callback into
+  // pipeline.ts's run().
   if (tty && args.subcommand === "checkup") {
     process.stdout.write(trustLine(ink, sym) + "\n");
     process.stdout.write(scanCounterLine(0, 1, pickLoadingPun(), ink, sym) + "\n");
@@ -233,7 +234,7 @@ async function main(): Promise<number> {
 
   if (summary.branch === "ambiguous") {
     if (args.json) {
-      // --json never prompts (module contract) — report ambiguous as-is.
+      // --json never prompts — report ambiguous as-is.
       process.stdout.write(JSON.stringify(summary, null, 2) + "\n");
       return 0;
     }
@@ -270,7 +271,7 @@ async function dispatch(
 ): Promise<number> {
   const opts = { tty: renderOpts.tty, noColor: !renderOpts.color };
 
-  // --json always wins (stable machine-readable schema, S3).
+  // --json always wins (stable machine-readable schema).
   if (args.json) {
     process.stdout.write(JSON.stringify(summary, null, 2) + "\n");
     return 0;
@@ -283,9 +284,9 @@ async function dispatch(
 
     // "enable" / "revert" never reach this switch: non-json runs are
     // early-routed to runStandaloneAction() in main() BEFORE the pipeline
-    // (fix — they must work without transcripts), and --json runs return
-    // via the JSON dump above. Keeping a single standalone write path (with
-    // its consent gate) avoids a second, unguarded route to applyEnable.
+    // (they must work without transcripts), and --json runs return via the
+    // JSON dump above. Keeping a single standalone write path (with its
+    // consent gate) avoids a second, unguarded route to applyEnable.
 
     case "verify": {
       const res = await runVerify({ home: homedir() });
@@ -325,17 +326,17 @@ async function renderCheckup(
   }
 
   if (!opts.tty) {
-    // Plain ASCII, no stagger, no in-place updates, single shot (module contract).
+    // Plain ASCII, no stagger, no in-place updates, single shot.
     const full = renderFull(summary, opts);
     process.stdout.write(full.lines.join("\n") + "\n");
     return await maybeConsentFromEnding(args, summary, full.needsConsent, full.consentVerb);
   }
 
-  // TTY path: staggered reveal of beats 0-1, then the rest prints normally.
-  // Never clears the screen at any point (module contract).
+  // TTY path: staggered reveal of the trust line and CHECKUP header, then
+  // the rest prints normally. Never clears the screen at any point.
   const ink = makeInk(!opts.noColor);
   // Reached only when opts.tty is true (see the !opts.tty branch above), so
-  // this is always the Unicode table — ascii-ness tracks TTY-ness (module contract).
+  // this is always the Unicode table — ascii-ness tracks TTY-ness.
   const sym = makeSym(false);
   await staggerPrint(checkupLines(summary, ink, sym));
   process.stdout.write("\n" + numberBox(summary, ink, sym) + "\n\n");
@@ -350,7 +351,7 @@ async function renderCheckup(
   return await maybeConsentFromEnding(args, summary, ending.needsConsent, ending.consentVerb);
 }
 
-/** ~150ms stagger between CHECKUP's ✓✓⚠ lines, TTY only (module contract). */
+/** ~150ms stagger between CHECKUP's ✓✓⚠ lines, TTY only. */
 async function staggerPrint(lines: string[]): Promise<void> {
   for (const line of lines) {
     process.stdout.write(line + "\n");
@@ -363,23 +364,21 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * Standalone `cache-cash enable` / `cache-cash revert` (the contract first-class
+ * Standalone `cache-cash enable` / `cache-cash revert` (first-class
  * subcommands). Runs BEFORE the analysis pipeline — the settings edit needs
- * no Summary, so a HOME with zero transcripts can still enable/revert
- * (follow-up fix; previously these were unreachable behind the
- * "No transcripts found" gate in main()).
+ * no Summary, so a HOME with zero transcripts can still enable/revert;
+ * enable/revert must work without any transcripts present, unlike the
+ * "No transcripts found" gate that guards the rest of main().
  *
- * Consent discipline mirrors maybeConsentFromEnding exactly (S3/S4):
- * interactive [y/N] by default, --yes skips it, and a non-interactive run
- * without --yes writes NOTHING — the one write is always confirmed. (The
- * old dispatch() cases this replaces called applyEnable/applyRevert with no
- * confirmation at all — fixed as part of this restructure.)
+ * Consent discipline mirrors maybeConsentFromEnding exactly: interactive
+ * [y/N] by default, --yes skips it, and a non-interactive run without --yes
+ * writes NOTHING — the one write is always confirmed.
  *
  * For `enable`, the pipeline still runs best-effort AFTER consent so the
- * recheck baseline gets written when transcripts exist (the design:
- * "enable writes a small local baseline file"). Analysis failure or an
- * empty corpus skips the baseline silently — it is convenience data for
- * recheck receipts, never a precondition for the settings edit.
+ * recheck baseline gets written when transcripts exist ("enable writes a
+ * small local baseline file"). Analysis failure or an empty corpus skips the
+ * baseline silently — it is convenience data for recheck receipts, never a
+ * precondition for the settings edit.
  */
 async function runStandaloneAction(args: Args): Promise<number> {
   const verb: "enable" | "revert" = args.subcommand === "enable" ? "enable" : "revert";
@@ -432,9 +431,8 @@ async function maybeConsentFromEnding(
   if (!needsConsent || !consentVerb) return 0;
 
   // --json never prompts and never reaches here (handled earlier). Non-TTY
-  // (piped) also never prompts: print the manual instruction and exit 0,
-  // consistent with "no interactive prompts in agents" (the standing rules)
-  // and S3's non-prompting contract for non-interactive contexts.
+  // (piped) also never prompts: print the manual instruction and exit 0 —
+  // never prompt when not attached to a TTY.
   const interactive = process.stdout.isTTY && !process.env.CI;
   const verbLabel = consentVerb === "enable" ? "Enable 1h now" : "Revert to 5m now";
 

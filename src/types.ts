@@ -1,16 +1,18 @@
 /**
  * Core data contracts for cachecash.
  *
- * This file freezes two module contracts:
- *   the contract — {@link TurnEvent}: the parse output. Owned by the analyzer, consumed by the renderer/the actions module.
- *   the contract — {@link Summary}: the `--json` schema. Owned by the analyzer, consumed by
- *        the renderer (renders), the actions module (baseline/recheck), the docs (documents).
+ * This file freezes two stable interfaces:
+ *   {@link TurnEvent} — the parse output, produced by parse.ts and consumed
+ *     by the renderer and the actions module.
+ *   {@link Summary} — the `--json` schema, produced by parse.ts/analyze.ts
+ *     and consumed by the renderer (render.ts), the actions module
+ *     (baseline/recheck), and the documentation (METHODOLOGY.md).
  *
  * Both are intentionally self-describing: every derived number carries its
  * inputs or units so downstream renderers never have to re-derive.
  */
 
-// ------------------------------------------------------------------ S1: parse
+// -------------------------------------------------------------- parse output
 
 /** Gap class of a turn relative to the previous usage turn in the same session. */
 export type GapClass = "start" | "warm" | "recoverable" | "cold";
@@ -51,7 +53,7 @@ export interface TurnEvent {
   project: string;
 }
 
-// ------------------------------------------------------------- S2: the Summary
+// -------------------------------------------------------------- the Summary
 
 /** Which billing/TTL branch the user is in. Drives the verdict. */
 export type Branch = "api-5m" | "api-1h" | "subscription" | "ambiguous";
@@ -183,9 +185,9 @@ export interface TtlRealityCheck {
 }
 
 /**
- * the contract — the full machine-readable summary. Stable, documented, versioned.
- * Every field the the design's multi-section checkup needs is present here so the
- * renderer (the renderer) is a pure function of this object.
+ * The full machine-readable summary. Stable, documented, versioned.
+ * Every field the checkup rendering needs is present here so the renderer is
+ * a pure function of this object.
  */
 export interface Summary {
   /** Schema/version marker so downstream can detect shape drift. */

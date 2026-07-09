@@ -1,9 +1,10 @@
 /**
  * Pure formatting + terminal-craft helpers. No I/O, no Summary knowledge —
- * this module is the low-level toolkit render.ts builds the multi-section
- * layout from.
+ * this module is the low-level toolkit render.ts builds the checkup output
+ * from.
  *
- * Craft laws (S5, project-locked):
+ * Craft laws (pinned; do not change without re-verifying against the CLI's
+ * terminal-output contract):
  *   - box() never exceeds 57 total columns (brandmark box law).
  *   - Nothing in here ever emits a clear-screen sequence.
  *   - Color helpers no-op when `enabled` is false (non-TTY / --no-color / CI).
@@ -47,12 +48,12 @@ export function makeInk(enabled: boolean): Ink {
 // ----------------------------------------------------------------- symbols
 
 /**
- * Decorative glyph table. `ascii=true` (non-TTY / CI / --no-color, per S5)
- * swaps every Unicode decoration for a plain-ASCII equivalent so
- * `CI=1 node dist/cli.js | cat` is byte-clean 7-bit ASCII, matching the S5
- * craft law ("non-TTY/CI -> plain ASCII, no color, no stagger"). The em dash
- * used freely in prose is included here too (as `dash`) rather than left as
- * a bare literal in render.ts, so the ASCII sweep is total, not partial.
+ * Decorative glyph table. `ascii=true` (non-TTY / CI / --no-color) swaps
+ * every Unicode decoration for a plain-ASCII equivalent so
+ * `CI=1 node dist/cli.js | cat` is byte-clean 7-bit ASCII, matching the craft
+ * law ("non-TTY/CI -> plain ASCII, no color, no stagger"). The em dash used
+ * freely in prose is included here too (as `dash`) rather than left as a
+ * bare literal in render.ts, so the ASCII sweep is total, not partial.
  */
 export interface Sym {
   ascii: boolean;
@@ -66,7 +67,7 @@ export interface Sym {
 export function makeSym(ascii: boolean): Sym {
   if (ascii) {
     // check maps to "OK", not "[x]": an x-in-brackets reads as failure /
-    // unchecked-checkbox in plain text (post-review fix #4).
+    // unchecked-checkbox in plain text.
     return { ascii, check: "OK", warn: "[!]", bullet: ">", dot: "-", dash: "-" };
   }
   return { ascii, check: "✓", warn: "⚠", bullet: "»", dot: "·", dash: "—" };
@@ -80,7 +81,7 @@ export function stripAnsi(s: string): string {
 
 // -------------------------------------------------------------------- box
 
-const BOX_WIDTH = 57; // hard the contract law: section box <= 57 cols, total width incl. borders.
+const BOX_WIDTH = 57; // hard law: the score box <= 57 cols, total width incl. borders.
 const BOX_INNER = BOX_WIDTH - 2;
 
 export interface BoxLine {
@@ -110,8 +111,8 @@ function boxRow(text: string, align: "center" | "left", side: string): string {
  * unpadded (never truncated — callers are responsible for width-fitting their
  * content; this only clamps padding, matching the "verify widths" instruction).
  *
- * `ascii=true` (non-TTY / CI / --no-color, per S5) draws with plain +/-/|
- * instead of Unicode box-drawing chars — the CI smoke test
+ * `ascii=true` (non-TTY / CI / --no-color) draws with plain +/-/| instead of
+ * Unicode box-drawing chars — the CI smoke test
  * (`CI=1 node dist/cli.js | cat`) requires byte-clean ASCII output.
  */
 export function box(lines: Array<string | BoxLine>, ascii = false): string {

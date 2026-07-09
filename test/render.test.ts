@@ -1,8 +1,8 @@
 /**
- * Render snapshot + width tests. Snapshots strip ANSI (per the renderer spec: "snapshot
- * tests for all three endings + card + --md + --compact from fixture
- * Summaries; strip ANSI in snapshots"). Width tests assert the hard the contract laws:
- * section box exactly <=57 cols, no line exceeds 80 cols in the default
+ * Render snapshot + width tests. Snapshots strip ANSI (snapshot tests cover
+ * all three endings + card + --md + --compact from fixture Summaries; ANSI
+ * is stripped in snapshots). Width tests assert the hard layout laws: the
+ * score box exactly <=57 cols, no line exceeds 80 cols in the default
  * (non-TTY, since tests run non-interactively) render.
  */
 
@@ -46,7 +46,7 @@ describe("ending decision logic", () => {
   });
 });
 
-describe("section box width law (S5: <=57 cols)", () => {
+describe("score box width law (<=57 cols)", () => {
   it("numberBox is exactly 57 cols on every line, for all three fixtures, TTY and non-TTY (Unicode and ASCII box chars)", () => {
     for (const s of [fixtureEndingAEnable, fixtureEndingBOptimal, fixtureEndingCReceipt]) {
       for (const tty of [true, false]) {
@@ -61,8 +61,8 @@ describe("section box width law (S5: <=57 cols)", () => {
 });
 
 describe("no line exceeds 80 cols (default terminal width)", () => {
-  // Scope: "at default terminal" (the renderer spec) means terminal-rendered modes.
-  // --md is explicitly the Slack/Teams paste payload (prose in a chat client,
+  // Scope: "at default terminal" means terminal-rendered modes. --md is
+  // explicitly the Slack/Teams paste payload (prose in a chat client,
   // not a terminal) — its table rows may legitimately run longer; it still
   // gets its own ANSI-free assertion above and a snapshot below.
   it("renderFull, non-TTY, all fixtures", () => {
@@ -95,7 +95,7 @@ describe("non-TTY renders are ANSI-free", () => {
   });
 });
 
-describe("non-TTY / CI renders are byte-clean 7-bit ASCII (the contract law)", () => {
+describe("non-TTY / CI renders are byte-clean 7-bit ASCII (layout law)", () => {
   // This is the exact gate `CI=1 node dist/cli.js | cat` exercises at the
   // CLI level: no box-drawing chars, no checkmarks, no em dashes, no color.
   function nonAsciiChars(text: string): string[] {
@@ -114,7 +114,7 @@ describe("non-TTY / CI renders are byte-clean 7-bit ASCII (the contract law)", (
       expect(nonAsciiChars(renderCompact(s, NON_TTY))).toEqual([]);
     }
   });
-  it("ASCII check glyph is 'OK', not '[x]' (post-review fix #4: [x] reads as failure)", () => {
+  it("ASCII check glyph is 'OK', not '[x]' ([x] reads as failure)", () => {
     expect(makeSym(true).check).toBe("OK");
     expect(makeSym(true).warn).toBe("[!]");
     const { lines } = renderFull(fixtureEndingCReceipt, NON_TTY);
@@ -168,7 +168,7 @@ describe("wrapped lines never cite unattributable causes", () => {
         .slice(1)
         .filter((l) => l.trim().length > 0);
       // Regroup physical lines into logical bullets: a bullet starts with "»",
-      // continuation (wrapped) lines don't. The design law ("every line
+      // continuation (wrapped) lines don't. The layout law ("every line
       // contains a number") is about the logical insight, not every wrapped
       // terminal row.
       const insights: string[] = [];
@@ -178,7 +178,7 @@ describe("wrapped lines never cite unattributable causes", () => {
       }
       for (const insight of insights) {
         expect(insight).not.toMatch(/resume/i);
-        // every insight has a number (design law: "EVERY line contains a number")
+        // every insight has a number (layout law: "EVERY line contains a number")
         expect(insight).toMatch(/\d/);
         const matches = ATTRIBUTABLE_HINTS.some((h) => insight.toLowerCase().includes(h));
         expect(matches).toBe(true);
@@ -187,7 +187,7 @@ describe("wrapped lines never cite unattributable causes", () => {
   });
 });
 
-describe("currency separation (a locked design choice)", () => {
+describe("currency separation", () => {
   it("subscriber receipt never says 'saved you $' without -equivalent / -eq", () => {
     const { lines } = renderFull(fixtureEndingCReceipt, NON_TTY);
     const text = stripAnsi(lines.join("\n"));
@@ -203,7 +203,7 @@ describe("currency separation (a locked design choice)", () => {
 });
 
 describe("caching-vs-uncached honesty (write-heavy/read-light can make caching cost MORE)", () => {
-  // Regression coverage for a real bug found during the renderer smoke testing: a
+  // Regression coverage for a real bug found during renderer smoke testing: a
   // synthetic write-heavy, read-light corpus produces uncachedCost <
   // actualCost (the 1.25x/2x write markup isn't recouped by 0.1x reads), and
   // the render used to print a nonsensical "Caching saved you -$2.41".
@@ -229,7 +229,7 @@ describe("caching-vs-uncached honesty (write-heavy/read-light can make caching c
   });
 });
 
-describe("receipt verification line shows the 1h WRITE SHARE, not R/C (post-review fix #1, launch-lethal)", () => {
+describe("receipt verification line shows the 1h WRITE SHARE, not R/C (launch-lethal regression)", () => {
   // The verification line's percentage was wired to recoverableRatio (a
   // gap-bucket ratio) instead of the 1h TTL write share. The fixture is the
   // real corpus shape where the two differ decisively: R/C = 13.7% vs
@@ -255,7 +255,7 @@ describe("receipt verification line shows the 1h WRITE SHARE, not R/C (post-revi
   });
 });
 
-describe("receipt ordering (post-review fix #2): counterfactual headline leads", () => {
+describe("receipt ordering: counterfactual headline leads", () => {
   it("headline (1h-vs-5m, window-labeled) -> vs-uncached -> verification, in that order", () => {
     const { lines } = renderFull(fixtureEndingCReceipt, NON_TTY);
     // Flatten wrapping: the headline hard-wraps at 80 cols mid-phrase, so
@@ -280,7 +280,7 @@ describe("receipt ordering (post-review fix #2): counterfactual headline leads",
   });
 });
 
-describe("section box is ending-aware (post-review fix #3)", () => {
+describe("score box is ending-aware", () => {
   it("ending C's box leads with the $-eq receipt figure; score is the second line", () => {
     const rendered = stripAnsi(numberBox(fixtureEndingCReceipt, makeInk(false), makeSym(true)));
     expect(rendered).toContain("YOUR 1H CACHE RECEIPT");
@@ -288,11 +288,11 @@ describe("section box is ending-aware (post-review fix #3)", () => {
     expect(rendered).toContain("efficiency score: 98.5 / 100");
     expect(rendered.indexOf("saved ~$2,500.95-eq")).toBeLessThan(rendered.indexOf("efficiency score"));
     for (const line of rendered.split("\n")) {
-      expect(line.length).toBe(boxWidth); // width law still holds for the new shape
+      expect(line.length).toBe(boxWidth); // width law still holds for this shape
     }
   });
   it("'certified optimal' is exclusively ending B's label", () => {
-    // B keeps it (both in its section box label and its certificate box)...
+    // B keeps it (both in its score box label and its certificate box)...
     const bBox = stripAnsi(numberBox(fixtureEndingBOptimal, makeInk(false), makeSym(true)));
     expect(bBox).toContain("certified optimal");
     // ...and it appears NOWHERE in a full C render, even at score 98.5.
@@ -304,16 +304,16 @@ describe("section box is ending-aware (post-review fix #3)", () => {
   });
 });
 
-describe("currency separation on shared surfaces (post-review fix round 2)", () => {
+describe("currency separation on shared surfaces", () => {
   // On the subscriber branch every waste $-figure must carry the terse "-eq"
-  // suffix — card, --compact, WRAPPED lines, and the CHECKUP record-scratch
-  // line previously showed bare "$" while the QUOTA-LEAK LIST said "$X-eq"
-  // for the same figures (internal inconsistency + design-decision-#7 gap on
-  // exactly the most-shared surfaces). API branches stay bare "$".
+  // suffix — card, --compact, WRAPPED lines, and the CHECKUP warning line
+  // must be consistent with the QUOTA-LEAK LIST, which says "$X-eq" for the
+  // same figures, on exactly the most-shared surfaces. API branches stay
+  // bare "$".
   const sub = fixtureEndingCReceipt; // currency: "USD-equivalent (API list rates)"
   const api = fixtureEndingAEnable; // currency: "USD"
 
-  it("subscriber: checkup record-scratch line carries -eq", () => {
+  it("subscriber: checkup warning line carries -eq", () => {
     const text = stripAnsi(checkupLines(sub, makeInk(false), makeSym(true)).join("\n"));
     expect(text).toContain("($618.60-eq)");
   });

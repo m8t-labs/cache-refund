@@ -1,20 +1,21 @@
 /**
- * The multi-section layout renderer. Pure function of `Summary` (module contract) — never
- * recomputes a number, only formats. render.ts owns:
+ * The checkup renderer. Pure function of `Summary` — never recomputes a
+ * number, only formats. render.ts owns the checkup sequence, in order:
  *
- *   section  trust line + live scan counter        (TTY only, update-in-place)
- *   section  CHECKUP header, ✓✓⚠ stagger            (TTY only, 150ms)
- *   section  THE NUMBER (efficiency score box)       <=57 cols, brandmark
- *   section  gap bars + verdict line
- *   section  YOUR CACHE, WRAPPED (3-5 insight lines)
- *   section  ending (A: consent prompt · B: certificate · C: receipt)
- *   section  share rail
+ *   trust line + live scan counter    (TTY only, update-in-place)
+ *   CHECKUP header, ✓✓⚠ stagger        (TTY only, 150ms)
+ *   THE NUMBER (efficiency score box)  <=57 cols, brandmark
+ *   gap bars + verdict line
+ *   YOUR CACHE, WRAPPED (3-5 insight lines)
+ *   ending (recommender: consent prompt · validator: certificate · receipt)
+ *   share rail
  *
- * Plus alternate render modes: card (section box + top Wrapped line), --md
+ * Plus alternate render modes: card (score box + top Wrapped line), --md
  * (plain markdown, zero ANSI), --compact (~15 lines), --explain (formulas
  * with the user's own numbers substituted).
  *
- * Craft laws (S5, project-locked):
+ * Craft laws (pinned; do not change without re-verifying against the CLI's
+ * terminal-output contract):
  *   - Never clear the screen (no \x1b[2J / \x1b[H anywhere in this file).
  *   - Non-TTY / CI -> plain ASCII (box chars, ✓/⚠/»/·/em-dash all swap to
  *     ASCII via format.ts's Sym table), no stagger, no in-place updates.
@@ -22,9 +23,10 @@
  *     and does NOT force ASCII symbols/box chars on an otherwise-real TTY
  *     (RenderOptions.noColor is independent of RenderOptions.tty; ascii-ness
  *     tracks tty-ness alone — see cli.ts's `makeSym(!tty)`). Both flags are
- *     decided once by cli.ts, up front, per S5.
- *   - section box <= 57 cols (see format.ts box()).
- *   - Endings are deadpan. Loading-line puns are section's job only, one max.
+ *     decided once by cli.ts, up front.
+ *   - The score box <= 57 cols (see format.ts box()).
+ *   - Endings are deadpan. Loading-line puns are the trust line's job only,
+ *     one max.
  */
 
 import type { LeakRow, Summary } from "./types.js";
@@ -46,7 +48,7 @@ import {
 export type EndingKind = "A-enable" | "A-revert" | "B" | "C";
 
 export interface RenderOptions {
-  /** TTY-ness, decided once by cli.ts (S5: non-TTY => plain everything). */
+  /** TTY-ness, decided once by cli.ts (non-TTY => plain everything). */
   tty: boolean;
   /** Color forced off (--no-color), independent of TTY. */
   noColor?: boolean;
@@ -63,7 +65,7 @@ function watchTeaser(sym: Sym): string {
   return `watch (TTL regression alarm): coming in v1.1 ${sym.dash} watch the repo`;
 }
 
-/** the contract terminal-width law: no rendered line exceeds 80 cols at default terminal. */
+/** Terminal-width law: no rendered line exceeds 80 cols at default terminal. */
 const TERM_WIDTH = 80;
 
 /**
@@ -80,15 +82,14 @@ function wrapTerm(text: string, indent = ""): string[] {
 }
 
 /**
- * Currency-aware terse dollar formatter (a locked design choice, post-review
- * fix round 2): on subscriber branches (currency !== "USD") every waste/
- * saving figure carries a "-eq" suffix — including the space-constrained
- * shared surfaces (card, --compact, WRAPPED lines, the CHECKUP record-scratch
- * line) that previously showed bare "$" while the QUOTA-LEAK LIST said
- * "$X-eq" for the same figures. API branches stay bare "$". The full
- * "USD-equivalent (API list rates)" phrase remains on the prose lines that
- * already carry it (receipt headline, vs-uncached, --md verdict); this
- * helper is the terse form only.
+ * Currency-aware terse dollar formatter: on subscriber branches
+ * (currency !== "USD") every waste/saving figure carries a "-eq" suffix —
+ * including the space-constrained shared surfaces (card, --compact, WRAPPED
+ * lines, the CHECKUP warning line) so they stay consistent with the
+ * QUOTA-LEAK LIST, which already says "$X-eq" for the same figures. API
+ * branches stay bare "$". The full "USD-equivalent (API list rates)" phrase
+ * remains on the prose lines that already carry it (receipt headline,
+ * vs-uncached, --md verdict); this helper is the terse form only.
  */
 function fmtDollarsEq(s: Summary, n: number, decimals = 2): string {
   const base = fmtDollars(n, decimals);
@@ -98,8 +99,8 @@ function fmtDollarsEq(s: Summary, n: number, decimals = 2): string {
 // ------------------------------------------------------------- ending logic
 
 /**
- * Decide which of the four ending shapes to render. This is the renderer's decision
- * (not the analyzer's) per the the design's branch table:
+ * Decide which of the four ending shapes to render. This is the renderer's
+ * decision (not the analyzer's), per this branch table:
  *   api-5m + 1h wins (delta<0)      -> A-enable  (the recommender, positive case)
  *   api-5m + 5m already optimal     -> B          ("5m is optimal for you")
  *   api-1h + 1h wins (delta<0)      -> B          ("keeping 1h saves ~$X")
@@ -121,10 +122,10 @@ export function decideEnding(s: Summary): EndingKind {
   return "C";
 }
 
-// ------------------------------------------------------------------ beat 0
+// -------------------------------------------------------------- trust line
 
 /**
- * section trust line. The live scan counter itself is a CLI-owned stateful
+ * The trust line. The live scan counter itself is a CLI-owned stateful
  * loop (stdout.write with \r, TTY only) — render.ts only supplies the static
  * trust line text and the one-of-three loading pun, so cli.ts can drive the
  * update-in-place counter without this module knowing about timers.
@@ -148,7 +149,7 @@ export function scanCounterLine(filesScanned: number, filesTotal: number, pun: s
   return ink.dim(`  scanning ${filesScanned}/${filesTotal} sessions (${pct}%) ${sym.dash} ${pun}`);
 }
 
-// ------------------------------------------------------------------ beat 1
+// ----------------------------------------------------------------- checkup
 
 /** check/check/warn stagger lines. `staggerIndex` is which line is "revealed" so far (CLI drives the delay); render supplies all lines pre-built. */
 export function checkupLines(s: Summary, ink: Ink, sym: Sym): string[] {
@@ -167,15 +168,15 @@ export function checkupLines(s: Summary, ink: Ink, sym: Sym): string[] {
   return lines;
 }
 
-// ------------------------------------------------------------------ beat 2
+// ------------------------------------------------------------- score box
 
 /**
- * THE NUMBER: the <=57-col brandmarked section box. Also `card`'s top box.
- * Ending-aware (post-review fix #3): endings A/B lead with the efficiency
- * score; ending C (subscription receipt) leads with the $-equivalent
- * 1h-vs-5m receipt figure — the receipt's headline number — with the score
- * as the second line. The ending kind is derived internally from the Summary
- * (decideEnding) so callers' signatures are unchanged.
+ * THE NUMBER: the <=57-col brandmarked score box. Also `card`'s top box.
+ * Ending-aware: endings A/B lead with the efficiency score; ending C
+ * (subscription receipt) leads with the $-equivalent 1h-vs-5m receipt figure
+ * — the receipt's headline number — with the score as the second line. The
+ * ending kind is derived internally from the Summary (decideEnding) so
+ * callers' signatures are unchanged.
  */
 export function numberBox(s: Summary, ink: Ink, sym: Sym): string {
   const kind = decideEnding(s);
@@ -219,9 +220,9 @@ export function numberBox(s: Summary, ink: Ink, sym: Sym): string {
 
 /**
  * Human label for a score band. "certified optimal" is EXCLUSIVELY ending
- * B's label (post-review fix #3) — a high score on any other ending gets a
- * neutral "excellent" (A endings still have an actionable fix; C's box
- * doesn't use this label at all).
+ * B's label — a high score on any other ending gets a neutral "excellent"
+ * (A endings still have an actionable fix; C's box doesn't use this label at
+ * all).
  */
 function scoreLabel(score: number, sym: Sym, kind: EndingKind): string {
   if (score >= 95) return kind === "B" ? "certified optimal" : "excellent";
@@ -230,7 +231,7 @@ function scoreLabel(score: number, sym: Sym, kind: EndingKind): string {
   return "leaking a lot of money";
 }
 
-// ------------------------------------------------------------------ beat 3
+// ---------------------------------------------------------------- gap bars
 
 /** Gap bars: warm/recoverable/cold as proportion of creation, plus the R/C verdict line. */
 export function gapBars(s: Summary, ink: Ink, useAscii: boolean, sym: Sym): string[] {
@@ -267,14 +268,15 @@ export function verdictLine(s: Summary, ink: Ink, sym: Sym): string {
   );
 }
 
-// ------------------------------------------------------------------ beat 4
+// ------------------------------------------------------------- cache wrapped
 
 /**
  * "Your Cache, Wrapped": 3-5 insight lines ranked by extremity. Every line
  * carries a number. Sourced ONLY from Summary fields the analyzer actually
  * attributes (wrapped stats, leak rows, biggestMiss, worstDay) — never a
- * cause the analyzer can't compute (design amendment #3: no /resume lines).
- * biggestMiss/worstDay may be null (empty corpus) — guarded out, not padded.
+ * cause the analyzer can't compute (no /resume lines: that data isn't
+ * something the analyzer attributes). biggestMiss/worstDay may be null
+ * (empty corpus) — guarded out, not padded.
  */
 export function wrappedLines(s: Summary, ink: Ink, sym: Sym): string[] {
   interface Candidate {
@@ -355,8 +357,8 @@ function shortProject(project: string): string {
 
 /**
  * Shorten the (long, `LeakRow.label`) descriptions to fit narrow terminal
- * rows (CHECKUP's ⚠ line, the receipt's quota-leak list). Keeps the same
- * `cause` semantics, just fewer words — never changes meaning.
+ * rows (CHECKUP's warning line, the receipt's quota-leak list). Keeps the
+ * same `cause` semantics, just fewer words — never changes meaning.
  */
 function shortLeakLabel(label: string): string {
   const MAP: Record<string, string> = {
@@ -369,7 +371,7 @@ function shortLeakLabel(label: string): string {
   return MAP[label] ?? label;
 }
 
-// ------------------------------------------------------------------ beat 5
+// ------------------------------------------------------------------ ending
 
 export interface EndingRender {
   lines: string[];
@@ -465,13 +467,13 @@ function proofLine(s: Summary): string {
  * Hypothetical spend if prompt caching didn't exist at all: every cache-write
  * AND cache-read token instead billed as a fresh, full-price input token
  * (1x base P), summed per-model at that model's own basePrice — never a
- * blended rate, matching the rest of the cost math. NOT provided by S2
+ * blended rate, matching the rest of the cost math. NOT provided by Summary
  * directly (Counterfactual only carries cost5m/cost1h, both still-cached
  * worlds under a different TTL); derived here as a straight linear
  * recombination of `perModel[]`'s already-computed token totals, so this is
  * formatting/aggregation, not re-deriving analyzer math (gap classes, leak
  * attribution, etc. are untouched). Used by the "caching saved you $X vs
- * uncached" line the the design requires on endings B and C.
+ * uncached" line required on endings B and C.
  */
 function uncachedCost(s: Summary): number {
   let total = 0;
@@ -505,8 +507,8 @@ function cachingSavedLine(s: Summary, sym: Sym): string {
  * creation1h / (creation1h + creation5m). This is the number the receipt's
  * "verified in your transcripts: N% of writes are 1h" line shows — NOT
  * recoverableRatio (R/C), which is a gap-bucket ratio unrelated to TTL share.
- * (The two were wrongly wired together in the first cut — post-review fix #1.
- * On this machine's corpus: ~99.5% share vs R/C's 13.7%.)
+ * These two must not be conflated: on this machine's corpus they differ
+ * decisively (~99.5% share vs R/C's 13.7%).
  */
 function oneHourWriteShare(s: Summary): number {
   const denom = s.tokens.creation1h + s.tokens.creation5m;
@@ -514,9 +516,9 @@ function oneHourWriteShare(s: Summary): number {
 }
 
 /**
- * Window label for the receipt's counterfactual headline. Two-deltas rule
- * (the analyzer updates): `delta1hMinus5m` covers the SELECTED window and must be
- * labeled with that window — never with "/30d" (that's delta30d's label).
+ * Window label for the receipt's counterfactual headline. Two-deltas rule:
+ * `delta1hMinus5m` covers the SELECTED window and must be labeled with that
+ * window — never with "/30d" (that's delta30d's label).
  */
 function windowLabel(s: Summary): string {
   return s.window.mode === "days" && s.window.days != null
@@ -524,7 +526,7 @@ function windowLabel(s: Summary): string {
     : `over the ${Math.round(s.counterfactual.spanDays)}-day span analyzed`;
 }
 
-/** Short window label for the 57-col section receipt box. */
+/** Short window label for the 57-col receipt score box. */
 function windowLabelShort(s: Summary): string {
   return s.window.mode === "days" && s.window.days != null
     ? `last ${s.window.days}d`
@@ -532,12 +534,12 @@ function windowLabelShort(s: Summary): string {
 }
 
 /**
- * The subscriber receipt's LEAD line (post-review fix #2): the 1h-vs-5m
- * counterfactual from delta1hMinus5m (negative = 1h saved money), labeled
- * with its window. The vs-uncached line is deliberately SECOND — it's the
- * bigger number but the less pointed comparison; the 5m-world delta is the
- * receipt's actual claim ("your auto-1h is worth $X vs the default the API
- * crowd gets"). Honest flip for the (unusual) positive-delta subscriber.
+ * The subscriber receipt's LEAD line: the 1h-vs-5m counterfactual from
+ * delta1hMinus5m (negative = 1h saved money), labeled with its window. The
+ * vs-uncached line is deliberately SECOND — it's the bigger number but the
+ * less pointed comparison; the 5m-world delta is the receipt's actual claim
+ * ("your auto-1h is worth $X vs the default the API crowd gets"). Honest
+ * flip for the (unusual) positive-delta subscriber.
  */
 function receiptHeadline(s: Summary, sym: Sym): string {
   const delta = s.counterfactual.delta1hMinus5m;
@@ -557,7 +559,7 @@ function endingReceipt(s: Summary, ink: Ink, sym: Sym): EndingRender {
   const lines: string[] = [
     ink.bold("YOUR RECEIPT"),
     "",
-    // Ordering is load-bearing (post-review fix #2, snapshot-tested):
+    // Ordering is load-bearing (snapshot-tested):
     // 1) the 1h-vs-5m counterfactual headline, 2) vs-uncached, 3) verification.
     ...wrapTerm(receiptHeadline(s, sym)).map((l) => ink.bold(l)),
     ...wrapTerm(cachingSavedLine(s, sym)),
@@ -577,12 +579,13 @@ function endingReceipt(s: Summary, ink: Ink, sym: Sym): EndingRender {
 }
 
 function leakRowsForDisplay(leaks: LeakRow[]): LeakRow[] {
-  // Fixed order per the contract (already the array order); render zeros gracefully —
-  // an honest $0 row (no sidechain usage on this machine, etc.) is still shown.
+  // Fixed order per the Summary schema (already the array order); render
+  // zeros gracefully — an honest $0 row (no sidechain usage on this machine,
+  // etc.) is still shown.
   return leaks;
 }
 
-// ------------------------------------------------------------------ beat 6
+// -------------------------------------------------------------- share rail
 
 export function shareRail(ink: Ink, sym: Sym): string[] {
   return [ink.dim(METHODOLOGY_HINT), ink.dim(shareHint(sym))];
@@ -598,12 +601,13 @@ export interface FullRenderResult {
 }
 
 /**
- * Assemble beats 1-6 as static text (section's live counter is CLI-driven and
- * not included here — cli.ts prints it before calling this, then this
- * function's output follows). This is the shape used by the plain (no-TTY)
- * checkup AND is what the TTY path prints after its own staggered reveal of
- * beats 0-1 (cli.ts re-uses checkupLines()/numberBox() etc. directly for the
- * staggered path; renderFull is the single-shot non-TTY / --compact base).
+ * Assemble the checkup sections (score box onward) as static text (the trust
+ * line's live counter is CLI-driven and not included here — cli.ts prints it
+ * before calling this, then this function's output follows). This is the
+ * shape used by the plain (no-TTY) checkup AND is what the TTY path prints
+ * after its own staggered reveal of the trust line and CHECKUP header
+ * (cli.ts re-uses checkupLines()/numberBox() etc. directly for the staggered
+ * path; renderFull is the single-shot non-TTY / --compact base).
  */
 export function renderFull(s: Summary, opts: RenderOptions): FullRenderResult {
   const ink = makeInk(opts.tty && !opts.noColor);
@@ -632,7 +636,7 @@ export function renderFull(s: Summary, opts: RenderOptions): FullRenderResult {
 
 // -------------------------------------------------------------------- card
 
-/** `card`: section box + top Wrapped line + brandmark, fixed width, the canonical screenshot. */
+/** `card`: score box + top Wrapped line + brandmark, fixed width, the canonical screenshot. */
 export function renderCard(s: Summary, opts: RenderOptions): string {
   const ink = makeInk(opts.tty && !opts.noColor);
   const sym = makeSym(!opts.tty);
@@ -674,9 +678,9 @@ export function renderMarkdown(s: Summary): string {
   const lines: string[] = [];
   lines.push(`### ${BRAND} checkup`);
   lines.push("");
-  // --md is prose-exempt from the ASCII sweep (the contract comment above); scoreLabel
-  // now takes a Sym, so pass the Unicode table explicitly to keep this
-  // function's own output byte-identical to before this refactor.
+  // --md is prose-exempt from the ASCII sweep (see the craft-laws comment
+  // above); scoreLabel takes a Sym, so pass the Unicode table explicitly to
+  // keep this function's own output byte-identical across refactors.
   lines.push(`**Score:** ${s.efficiencyScore.toFixed(1)} / 100 — ${scoreLabel(s.efficiencyScore, makeSym(false), kind)}`);
   lines.push("");
   lines.push(`- Window: ${s.window.mode === "all-time" ? "all-time" : `last ${s.window.days} days`} (${s.scope.sessions.toLocaleString()} sessions, ${s.scope.turns.toLocaleString()} turns)`);
@@ -704,8 +708,8 @@ export function renderMarkdown(s: Summary): string {
   } else if (kind === "B") {
     lines.push(`**Verdict:** certified optimal ✓ — you're on the cheaper TTL for your pattern.`);
   } else {
-    // Mirrors the receipt's ordering (post-review fix #2): the 1h-vs-5m
-    // counterfactual leads the verdict; vs-uncached follows on its own line.
+    // Mirrors the receipt's ordering: the 1h-vs-5m counterfactual leads the
+    // verdict; vs-uncached follows on its own line.
     const uni = makeSym(false);
     lines.push(
       `**Verdict:** 1h already yours (subscription) ✓ — ${receiptHeadline(s, uni).replace(/^Your/, "your").replace(/^A /, "a ")}`,

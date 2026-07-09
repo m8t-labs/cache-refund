@@ -1,13 +1,12 @@
 /**
- * Actions API (contracts) — the ONLY write path in cache-cash.
+ * Actions API — the ONLY write path in cache-cash.
  *
- * "100% local, read-only except one confirmed line" (a locked design choice) is
- * enforced entirely by this module. Treat every function here like a
- * migration script: read -> validate -> backup -> targeted edit -> report.
- * Never a blind overwrite.
+ * "100% local, read-only except one confirmed line" is enforced entirely by
+ * this module. Treat every function here like a migration script:
+ * read -> validate -> backup -> targeted edit -> report. Never a blind
+ * overwrite.
  *
- * Final the contract signatures (widened from the renderer's zero-arg stub per its own
- * updates note — see FEATURE-03-actions-notes.md "Final the contract API"):
+ * Public API:
  *
  *   applyEnable(opts: ActionOpts): ActionResult
  *   applyRevert(opts: ActionOpts): ActionResult
@@ -41,11 +40,11 @@ import type { Summary } from "./types.js";
 export interface ActionOpts {
   /** Required. Never defaulted internally — every call site must be explicit. */
   home: string;
-  /** Defaults to process.env. Test contracts for the FORCE_PROMPT_CACHING_5M-via-env refuse path. */
+  /** Defaults to process.env. Test hook for the FORCE_PROMPT_CACHING_5M-via-env refuse path. */
   env?: NodeJS.ProcessEnv;
   /**
    * The current run's Summary, if available (cli.ts has it in scope at the
-   * consent call site — see the renderer's notes "the plumbing is already there").
+   * consent call site — the plumbing to pass it through is already there).
    * Used only to write the baseline file on successful enable. Optional:
    * enable still applies the flag without it, it just skips the baseline
    * write (recheck will then correctly report "no baseline found").
@@ -53,11 +52,10 @@ export interface ActionOpts {
   summary?: Summary;
   /**
    * applyRevert only: also set FORCE_PROMPT_CACHING_5M=1 instead of just
-   * removing ENABLE_PROMPT_CACHING_1H. Per the the actions module prompt: "honor an
-   * explicit --force-5m variant only if trivially clean" — this
-   * implementation applies that only when there is no OTHER conflicting
-   * env write already in flight (there never is, since force + the
-   * enable-flag-removal are the only two things this call touches).
+   * removing ENABLE_PROMPT_CACHING_1H. This honors an explicit --force-5m
+   * variant only when trivially clean — applied only when there is no OTHER
+   * conflicting env write already in flight (there never is, since force +
+   * the enable-flag-removal are the only two things this call touches).
    */
   force?: boolean;
 }
@@ -189,8 +187,8 @@ function writeBackup(home: string, currentRaw: string): void {
 
 /**
  * Serialize with 2-space indentation (matches Claude Code's own settings.json
- * formatting — confirmed against a real settings.json during the actions module design) plus
- * a trailing newline. This is a full reserialize of the parsed object, which
+ * formatting — confirmed against a real settings.json) plus a trailing
+ * newline. This is a full reserialize of the parsed object, which
  * means: whitespace *within* unrelated values is not "preserved" in the
  * literal-bytes sense (JSON has no comments/whitespace-in-values to lose),
  * but every KEY and every VALUE the file had is preserved exactly, and the
@@ -457,14 +455,12 @@ export function applyRevert(opts: ActionOpts): ActionResult {
 // ---------------------------------------------------------------- verify
 
 /**
- * `cache-cash verify` — re-runs the pipeline (per the analyzer notes: no new
- * transcript-reading code) over a small recent window and reads
- * `ttlRealityCheck`, exactly the way the analyzer notes instructs: "runVerify = re-
- * run run({days:1,...}) from pipeline.ts and read summary.ttlRealityCheck."
+ * `cache-cash verify` — re-runs the pipeline (no new transcript-reading
+ * code: it re-runs run({days:1,...}) from pipeline.ts and reads
+ * summary.ttlRealityCheck) over a small recent window.
  *
  * Window choice: since baseline/enable if one exists (days = ceil(now -
- * enabled_at)), else the last 24h (days: 1) per the the actions module prompt's own
- * fallback rule.
+ * enabled_at)), else the last 24h (days: 1) as the fallback rule.
  */
 export async function runVerify(opts: ActionOpts): Promise<ActionResult> {
   const baseline = readBaseline(opts.home);
@@ -530,7 +526,7 @@ export async function runVerify(opts: ActionOpts): Promise<ActionResult> {
  * "since switching: ~$X saved" receipt.
  *
  * Math (no new analyzer logic — reuses costmodel.ts's existing counterfactual
- * via a fresh run() over the since-enable window, per the analyzer notes guidance):
+ * via a fresh run() over the since-enable window):
  *   since = run({days: daysSinceEnable, home})
  *   saved = since.counterfactual.cost5m - since.counterfactual.actualCost
  * `cost5m` is "what this same post-enable activity would have cost under a

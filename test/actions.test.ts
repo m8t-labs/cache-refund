@@ -1,5 +1,5 @@
 /**
- * Actions (module contract) tests — the highest-blast-radius code in the repo.
+ * Actions tests — the highest-blast-radius code in the repo.
  *
  * HARD LAW: every test in this file runs under a synthetic HOME created by
  * `mkdtempSync`. Nothing here may EVER touch the real ~/.claude.
@@ -22,11 +22,10 @@
  * module load and per-call) to never coincide with the real account home
  * (read independently from the OS user database via `os.userInfo()`, which
  * — unlike `os.homedir()` — ignores the `HOME` env var, so it can't be
- * spoofed by the very value under test). This is the guard doing what the
- * the actions module prompt asks ("fail the test run if HOME resolves to a real user
- * home") applied to the HOME this suite actually constructs and passes to
- * the code under test, rather than to an ambient variable actions.ts never
- * consults.
+ * spoofed by the very value under test). This is the guard that fails the
+ * test run if HOME resolves to a real user home, applied to the HOME this
+ * suite actually constructs and passes to the code under test, rather than
+ * to an ambient variable actions.ts never consults.
  */
 
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -36,7 +35,7 @@ import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { applyEnable, applyRevert, runRecheck, runVerify } from "../src/actions.js";
 import type { Summary } from "../src/types.js";
 
-// --------------------------------------------------------- CI guard (the contract law)
+// --------------------------------------------------------- CI guard (hard law)
 
 /**
  * The REAL account home directory, from the OS password database
@@ -59,7 +58,7 @@ const REAL_ACCOUNT_HOME = (() => {
 /**
  * Fails the entire test run if this file's home-construction base
  * (`os.tmpdir()`) resolves to (or under) the real account home — the
- * explicit CI guard the the actions module prompt requires, applied to the value this file
+ * explicit CI guard this suite requires, applied to the value this file
  * actually uses. Runs once at module load, before any test executes.
  */
 beforeAll(() => {

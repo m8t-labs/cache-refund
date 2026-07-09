@@ -5,7 +5,7 @@
  * $/MTok), then summed — never with a single blended rate. Multipliers:
  *   write5 = 1.25P, write1h = 2P, read = 0.1P.
  *
- * COUNTERFACTUAL (symmetric, regime-aware) — from the the design:
+ * COUNTERFACTUAL (symmetric, regime-aware):
  *
  *   Actual cost  = Σ c5·1.25P + c1·2P + read·0.1P   (ground-truth reconstruction)
  *
@@ -468,7 +468,7 @@ export function wrappedStats(annotated: AnnotatedTurn[]): WrappedStats {
  *
  * All terms are $-valued from billed tokens only. Bias: captured uses 0.9P as
  * the realized saving of a hit over a full re-read; avoidable uses net leak
- * (already tail-corrected). Documented in METHODOLOGY (the docs).
+ * (already tail-corrected). Documented in METHODOLOGY.md.
  */
 export function efficiencyScore(
   annotated: AnnotatedTurn[],

@@ -1,5 +1,5 @@
 /**
- * Hand-crafted fixture `Summary` objects (module contract) for render tests. render.ts is
+ * Hand-crafted fixture `Summary` objects for render tests. render.ts is
  * a pure function of Summary, so these let us snapshot-test all three
  * endings + card/--md/--compact without going through the analyzer at all.
  * Every number here is internally consistent (buckets sum to totals, R/C
@@ -239,7 +239,7 @@ export const fixtureEndingBOptimal: Summary = {
   currency: "USD",
 };
 
-/** Ending C: subscription — the receipt. Matches the real corpus shape (the analyzer notes). */
+/** Ending C: subscription — the receipt. Matches the real corpus shape. */
 export const fixtureEndingCReceipt: Summary = {
   summaryVersion: 1,
   scoreVersion: 1,
@@ -354,9 +354,9 @@ export const fixtureEndingCReceipt: Summary = {
 };
 
 /**
- * Zero-leak edge case: an honest empty corpus / all-zero leak rows (real
- * possibility per the analyzer notes §5 — no sidechain usage, compaction excluded).
- * Used to test that zero rows render gracefully instead of being hidden.
+ * Zero-leak edge case: an honest empty corpus / all-zero leak rows (a real
+ * possibility — no sidechain usage, compaction excluded). Used to test that
+ * zero rows render gracefully instead of being hidden.
  */
 export const fixtureAllZeroLeaks: Summary = {
   ...fixtureEndingBOptimal,

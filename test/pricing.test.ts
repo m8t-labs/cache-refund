@@ -16,7 +16,7 @@ import {
 } from "../src/pricing.js";
 
 describe("multipliers + threshold", () => {
-  it("match the project-locked cache multipliers", () => {
+  it("match the pinned cache multipliers", () => {
     expect(MULT_5M_WRITE).toBe(1.25);
     expect(MULT_1H_WRITE).toBe(2.0);
     expect(MULT_READ).toBe(0.1);

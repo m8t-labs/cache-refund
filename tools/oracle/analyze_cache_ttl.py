@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Reference implementation for the parity tests. The TS implementation must match
-its bucket totals and R/C exactly on the same inputs; counterfactual deltas may
-differ only by the documented tail-write correction. Do not "improve" this file;
-it is the reference the tests compare against.
+"""Reference implementation used by the parity tests. The TypeScript
+implementation must match its bucket totals and R/C exactly on the same
+inputs; counterfactual deltas may differ only by the documented tail-write
+correction. Do not modify this file; tests compare against its exact output.
 
 Reads Claude Code session transcripts (~/.claude/projects/<encoded-cwd>/*.jsonl),
 reconstructs per-session cache behavior, and decides whether a 1-hour cache TTL

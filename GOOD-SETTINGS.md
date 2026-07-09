@@ -3,8 +3,8 @@
 **This file is content, not product.** `cache-cash` the tool only ever tells you
 things it *measured from your own transcripts* and priced. This page is the other
 thing — general advice about cache-friendly settings — kept deliberately separate
-because opinions are not the product (a locked design choice: the tool grows only
-along the *measurable-waste* axis, never the opinions axis).
+because opinions are not the product: the tool grows only along the
+*measurable-waste* axis, never the opinions axis.
 
 So everything here is **ranked by evidence level**, strongest first, and every
 row points at what — if anything — `cache-cash` can actually measure for you.

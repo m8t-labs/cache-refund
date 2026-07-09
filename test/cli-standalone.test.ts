@@ -1,9 +1,8 @@
 /**
- * CLI-level tests for the standalone enable/revert path (fix, reviewer
- * follow-up): `enable` and `revert` are first-class subcommands and must
- * work in a HOME with ZERO transcripts — the settings edit needs no Summary.
- * Previously they were unreachable behind main()'s "No transcripts found"
- * pipeline gate.
+ * CLI-level tests for the standalone enable/revert path: `enable` and
+ * `revert` are first-class subcommands and must work in a HOME with ZERO
+ * transcripts — the settings edit needs no Summary. They must not be
+ * reachable only behind main()'s "No transcripts found" pipeline gate.
  *
  * These tests spawn the real compiled `dist/cli.js` binary under a synthetic
  * HOME, covering the exact flow a user's `npx cache-cash enable --yes`
@@ -91,7 +90,7 @@ function runCli(home: string, args: string[]): { status: number | null; stdout: 
 
 const maybe = existsSync(CLI) ? describe : describe.skip;
 
-maybe("standalone enable/revert route before the pipeline (S3: no transcripts required)", () => {
+maybe("standalone enable/revert route before the pipeline (no transcripts required)", () => {
   it("enable --yes succeeds end-to-end in an empty-transcript HOME (settings written)", () => {
     const home = freshHome();
     // No .claude dir, no projects, no transcripts — the previously-broken case.
