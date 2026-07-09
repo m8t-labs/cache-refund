@@ -1,0 +1,116 @@
+name: release
+
+# Release mechanics for cache-cash. NOT a PR gate — invoked manually
+# (workflow_dispatch) or by a CD caller (workflow_call). OIDC trusted
+# publishing: no NPM_TOKEN. One-time seed before OIDC works: publish once
+# manually, then on npmjs.com → package → Settings → Trusted Publisher →
+# GitHub Actions → m8t-labs/cachecash, workflow release.yml.
+on:
+  workflow_dispatch:
+    inputs:
+      dist-tag:
+        description: "npm dist-tag (e.g. latest, next)"
+        type: string
+        default: latest
+      dry-run:
+        description: "Pack + validate only; do not publish"
+        type: boolean
+        default: true
+  workflow_call:
+    inputs:
+      dist-tag:
+        type: string
+        required: false
+        default: latest
+      dry-run:
+        type: boolean
+        required: false
+        default: false
+    outputs:
+      published:
+        value: ${{ jobs.publish-npm.outputs.published }}
+      version:
+        value: ${{ jobs.publish-npm.outputs.version }}
+
+permissions:
+  contents: read
+  id-token: write # required for npm OIDC trusted publishing
+
+jobs:
+  publish-npm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      published: ${{ steps.gate.outputs.publish == 'true' && inputs.dry-run == false }}
+      version: ${{ steps.gate.outputs.version }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - name: Upgrade npm to an OIDC-capable version (>= 11.5.1)
+        run: npm install -g npm@^11.5.1
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+      - name: Idempotency gate
+        id: gate
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [ -n "$(npm view "cache-cash@$version" version 2>/dev/null || true)" ]; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::cache-cash@$version already on npm — skipping publish"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Publish to npm (OIDC)
+        if: steps.gate.outputs.publish == 'true'
+        env:
+          DRY_RUN: ${{ inputs.dry-run }}
+          DIST_TAG: ${{ inputs.dist-tag }}
+        run: |
+          set -euo pipefail
+          # Drop build-only devDeps from the published manifest; dist/ is
+          # already built above, so skip lifecycle scripts on publish.
+          npm pkg delete devDependencies
+          if [ "$DRY_RUN" = "true" ]; then
+            npm publish --access public --tag "$DIST_TAG" --ignore-scripts --dry-run
+          else
+            npm publish --access public --tag "$DIST_TAG" --ignore-scripts
+          fi
+
+  verify-install:
+    needs: publish-npm
+    if: inputs.dry-run == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - name: Install from npm and smoke the CLI
+        shell: bash
+        env:
+          DIST_TAG: ${{ inputs.dist-tag }}
+        run: |
+          set -euo pipefail
+          mkdir consumer && cd consumer
+          npm init -y >/dev/null
+          npm install "cache-cash@${DIST_TAG}"
+          # A runner has no ~/.claude/projects; the correct behavior is a
+          # clean exit code 1 with the no-transcripts message. That proves
+          # the bin resolves, node >=18 runs it, and the guard path works.
+          set +e
+          out="$(npx cache-cash --json 2>&1)"
+          code=$?
+          set -e
+          echo "$out"
+          if [ "$code" = "1" ] && echo "$out" | grep -q "No transcripts"; then
+            echo "cache-cash CLI OK (clean no-transcripts exit)"
+          else
+            echo "unexpected exit $code" >&2
+            exit 1
+          fi
