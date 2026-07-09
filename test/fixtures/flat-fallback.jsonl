@@ -1,0 +1,2 @@
+{"type":"assistant","timestamp":"2026-02-01T00:00:00.000Z","sessionId":"F","isSidechain":false,"message":{"id":"f1","model":"claude-opus-4-8","usage":{"cache_creation_input_tokens":500000,"cache_read_input_tokens":0}}}
+{"type":"assistant","timestamp":"2026-02-01T00:10:00.000Z","sessionId":"F","isSidechain":false,"message":{"id":"f2","model":"claude-opus-4-8","usage":{"cache_creation_input_tokens":200000,"cache_read_input_tokens":700000}}}

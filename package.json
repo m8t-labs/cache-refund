@@ -1,0 +1,40 @@
+{
+  "name": "cache-cash",
+  "version": "0.9.0",
+  "description": "A cache doctor for Claude Code: find the money your prompt cache is leaking.",
+  "type": "module",
+  "bin": {
+    "cache-cash": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "METHODOLOGY.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "start": "node dist/cli.js"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "prompt-cache",
+    "cache",
+    "ttl",
+    "cost",
+    "anthropic",
+    "cli"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.4.0",
+    "vitest": "^1.6.0"
+  }
+}
