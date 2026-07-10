@@ -177,6 +177,19 @@ export interface BuildSummaryInput {
    * behavior byte-for-byte.
    */
   branchOverride?: Branch;
+  /**
+   * Provenance of `branchOverride`, for the evidence trail's final bullet.
+   * "interactive" (the default when unset — preserves the pre-existing
+   * behavior byte-for-byte): the CLI's one-question ambiguous-branch prompt
+   * (cli.ts's promptBranch); evidence says "user-confirmed ... answered the
+   * interactive branch question", because that's literally what happened.
+   * "flag": the hidden `--branch-override` dev flag (a QA/screenshot tool —
+   * see CONTRIBUTING.md's "Previewing the other endings"), which force-picks
+   * a branch WITHOUT the user ever answering that question; evidence instead
+   * says "branch override (--branch-override)" so the trail never claims an
+   * interaction that never happened.
+   */
+  branchOverrideSource?: "interactive" | "flag";
 }
 
 const DAY_S = 86400;
@@ -195,7 +208,12 @@ export function buildSummary(input: BuildSummaryInput): Summary {
   const branch = input.branchOverride
     ? {
         branch: input.branchOverride,
-        evidence: [...detectBranch(hints, agg.regime, jsonMode).evidence, `=> user-confirmed: ${input.branchOverride} (answered the interactive branch question)`],
+        evidence: [
+          ...detectBranch(hints, agg.regime, jsonMode).evidence,
+          input.branchOverrideSource === "flag"
+            ? `=> branch override (--branch-override)`
+            : `=> user-confirmed: ${input.branchOverride} (answered the interactive branch question)`,
+        ],
       }
     : detectBranch(hints, agg.regime, jsonMode);
 

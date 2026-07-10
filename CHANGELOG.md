@@ -34,6 +34,23 @@ All notable changes to this project are documented here. The format follows
   share-ready block is re-printed as the final frame, so the tail of the
   terminal is the screenshot.
 - **Prompt label**: `[c] copy for Slack` → `[c] copy to clipboard`.
+- **Closing card leads, then the bars**: the interactive checkup's final
+  screen now prints the closing card before the gap-bars breakdown
+  (previously the reverse) — the terminal's last frame now reads in the same
+  order as the generated share image (hero box, then the bars).
+- **Share-accept ordering fix**: accepting `[x]`/`[b]` now writes the card
+  image, copies it to the clipboard, and prints the "on your clipboard" tip
+  *before* opening the browser. Previously the browser could open first and
+  steal window focus right as the tip printed, so it scrolled by unread.
+- **Absorbed-value line**: the box and the generated card both gain a line —
+  `absorbed $X of API-value` — the list-rate value of what the cache kept you
+  from re-paying for, shown whenever it's a positive figure.
+- **Subscriber paradox, explained**: the receipt now spells out, in one
+  sentence, why a flat-priced plan can absorb a far larger API-value figure
+  (subscription usage is metered at API rates internally). A new
+  `--plan <usd>` flag turns that into a concrete multiple —
+  `~Nx your monthly plan, absorbed for free` — on the receipt, the card, and
+  the generated share image.
 
 ## [1.0.1] — 2026-07-10
 

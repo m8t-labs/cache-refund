@@ -10,10 +10,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildCardSvg, CARD_BASENAME, defaultCardDir, escapeXml, writeCardImage } from "../src/cardimage.js";
+import { absorbedDollars, fmtAbsorbed } from "../src/render.js";
 import {
   fixtureEndingAEnable,
   fixtureEndingBOptimal,
   fixtureEndingCReceipt,
+  fixtureNegativeCachingSavings,
 } from "./fixtures/summaries.js";
 
 const PROJECT_LEAKS = ["orders-api", "web-dashboard", "widgetco", "quietco", "-Users-"];
@@ -128,6 +130,64 @@ describe("buildCardSvg (v1.0.2: 720x720 square card)", () => {
 
   it("escapeXml escapes all five specials", () => {
     expect(escapeXml(`a & b < c > d " e ' f`)).toBe("a &amp; b &lt; c &gt; d &quot; e &apos; f");
+  });
+
+  describe("absorbed-value line (v1.0.2): dim, under the stat row (y=316)", () => {
+    it("renders the same figure the terminal box uses, for a positive fixture, on every ending", () => {
+      for (const s of [fixtureEndingAEnable, fixtureEndingBOptimal, fixtureEndingCReceipt]) {
+        const svg = buildCardSvg(s);
+        const absorbed = absorbedDollars(s);
+        expect(absorbed).not.toBeNull();
+        expect(svg).toContain(
+          `<text x="360" y="316" text-anchor="middle" class="t dim" font-size="14">${escapeXml(fmtAbsorbed(absorbed!))}</text>`,
+        );
+      }
+    });
+    it("omits the line entirely (no y=316 element) when there's nothing positive to absorb", () => {
+      const svg = buildCardSvg(fixtureNegativeCachingSavings);
+      expect(svg).not.toContain("absorbed $");
+      expect(svg).not.toContain('y="316"');
+    });
+  });
+
+  describe("--plan multiplier line (v1.0.2): dim, under the hero sub-line (y=266)", () => {
+    it("renders for the subscription fixture when a planPrice is passed", () => {
+      const svg = buildCardSvg(fixtureEndingCReceipt, 2000);
+      expect(svg).toContain(
+        `<text x="360" y="266" text-anchor="middle" class="t dim" font-size="14">${escapeXml("~6.0x your monthly plan, absorbed for free")}</text>`,
+      );
+    });
+    it("omits the line when no planPrice is passed", () => {
+      const svg = buildCardSvg(fixtureEndingCReceipt);
+      expect(svg).not.toContain("your monthly plan");
+      expect(svg).not.toContain('y="266"');
+    });
+    it("omits the line on API-branch endings even when a planPrice is passed (branch-gated)", () => {
+      const svg = buildCardSvg(fixtureEndingAEnable, 200);
+      expect(svg).not.toContain("your monthly plan");
+      expect(svg).not.toContain('y="266"');
+    });
+  });
+
+  describe("subscriber footer qualifier (v1.0.2 wording)", () => {
+    it("carries the updated two-half qualifier for the subscriber fixture", () => {
+      const svg = buildCardSvg(fixtureEndingCReceipt);
+      expect(svg).toContain("$ figures are API-value (list rates)");
+      expect(svg).toContain("subscription usage is metered in it, not billed");
+      expect(svg).not.toContain("— not a bill</text>");
+    });
+    it("API-branch cards carry no subscriber footer at all", () => {
+      const svg = buildCardSvg(fixtureEndingAEnable);
+      expect(svg).not.toContain("$ figures are API-value");
+    });
+  });
+
+  describe("gap-bars block position (v1.0.2: nudged down to make room for the absorbed line)", () => {
+    it("the section label sits at its new y, not the old one", () => {
+      const svg = buildCardSvg(fixtureEndingCReceipt);
+      expect(svg).toContain('<text x="80" y="359" class="t dim" font-size="12" letter-spacing="2">CACHE WRITES BY RE-WARM GAP</text>');
+      expect(svg).not.toContain('y="345"');
+    });
   });
 });
 

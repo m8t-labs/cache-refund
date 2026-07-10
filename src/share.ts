@@ -14,7 +14,10 @@
  * standing opt-out cli.ts checks before any of it.
  *
  * `spawnFn` is injectable so tests can assert command construction and the
- * no-clipboard-tool fallback without touching the real system.
+ * no-clipboard-tool fallback without touching the real system. runShareAccept
+ * (below) orchestrates the [x]/[b] accept sequence itself, also fully
+ * dependency-injected, so its call ORDER (image write + clipboard + tip
+ * BEFORE the browser opens) is unit-testable too — see its own doc comment.
  */
 
 import { readFileSync } from "node:fs";
@@ -250,4 +253,56 @@ export async function copyImageToClipboard(
     if (await runImageClipboardCommand(path, command, spawnFn, readFileFn)) return true;
   }
   return false;
+}
+
+// ------------------------------------------------------- share-accept order
+
+/** Dependencies for runShareAccept, injected so tests can assert call order without touching the real filesystem, clipboard, or a real browser spawn. */
+export interface ShareAcceptDeps {
+  /** Writes the card image (cardimage.ts's writeCardImage), pre-bound to the Summary being shared. */
+  writeCardImage: () => { svgPath: string; pngPath: string | null };
+  copyImageToClipboard: (path: string) => Promise<boolean>;
+  revealFile: (path: string) => void;
+  openExternal: (url: string) => Promise<boolean>;
+  /** stdout sink (process.stdout.write in production). */
+  write: (s: string) => void;
+}
+
+/**
+ * The share-accept sequence for [x]/[b]: write the card image, copy it to
+ * the clipboard, and print the tip — ALL BEFORE opening the browser.
+ *
+ * Real UX bug this fixes: the browser used to open FIRST. On most desktops
+ * that steals window focus the instant it launches, which raced the
+ * clipboard tip that printed right after — so the user's terminal lost
+ * focus before they ever saw "card image on your clipboard," and the tip
+ * scrolled by unread. Doing the image write + clipboard copy + tip first
+ * guarantees the tip hits stdout while the terminal still has focus; only
+ * THEN does the (possibly focus-stealing) browser spawn happen.
+ */
+export async function runShareAccept(url: string, deps: ShareAcceptDeps): Promise<void> {
+  try {
+    const { svgPath, pngPath } = deps.writeCardImage();
+    const file = pngPath ?? svgPath;
+    const clipped = pngPath ? await deps.copyImageToClipboard(pngPath) : false;
+    if (clipped) {
+      deps.write("card image on your clipboard — Cmd+V into the post\n");
+    } else {
+      deps.revealFile(file);
+      deps.write(`card image saved: ${file} — attach it to the post\n`);
+      if (!pngPath) {
+        deps.write(
+          "(png conversion unavailable — svg attached tools may not accept; screenshot the card above as backup)\n",
+        );
+      }
+    }
+  } catch {
+    // Image generation is a convenience — never let it break the share flow.
+    deps.write("(couldn't write the card image — screenshot the card above instead)\n");
+  }
+
+  const opened = await deps.openExternal(url);
+  if (!opened) {
+    deps.write(`couldn't launch a browser — open this yourself:\n${url}\n`);
+  }
 }

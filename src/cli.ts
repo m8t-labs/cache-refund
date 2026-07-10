@@ -15,8 +15,18 @@
  *               default is share-safe — no project names in screenshots)
  *   --no-share (v1.0.2: silence the share prompt; same as env
  *               CACHE_REFUND_NO_SHARE=1 — see maybeSharePrompt)
+ *   --plan <usd> (v1.0.2: monthly subscription price; subscription branch
+ *               only — renders "~Nx your monthly plan, absorbed for free"
+ *               on the receipt/card/SVG. Non-positive/non-numeric -> usage
+ *               error, exit 2. See render.ts's planMultiplierLine.)
  *
- * Exit codes: 0 ok · 1 no transcripts found · 2 parse/internal error.
+ * Also: --branch-override <api-5m|api-1h|subscription> — a HIDDEN dev-only
+ * flag (not in this list on purpose: not for README, not for users). Forces
+ * the billing branch on your REAL corpus numbers, for previewing the other
+ * endings without needing three different machines. See CONTRIBUTING.md's
+ * "Previewing the other endings" and verdict.ts's BuildSummaryInput.branchOverride.
+ *
+ * Exit codes: 0 ok · 1 no transcripts found · 2 parse/usage/internal error.
  * `--json` never prompts.
  *
  * TTY-ness is decided ONCE, here, up front, and threaded through every
@@ -36,6 +46,7 @@ import {
   noShareEnvSet,
   openExternal,
   revealFile,
+  runShareAccept,
   SHARE_PROMPT_LINE,
   xIntentUrl,
 } from "./share.js";
@@ -92,9 +103,42 @@ interface Args {
    * flag is the standing opt-out.
    */
   noShare: boolean;
+  /**
+   * --plan <usd> (v1.0.2): monthly subscription price, USD. Display-only —
+   * never affects any computed figure, only whether the "~Nx your monthly
+   * plan, absorbed for free" line renders (subscription branch only; see
+   * render.ts's planMultiplierLine). Validated at parse time: non-positive
+   * or non-numeric is a usage error (UsageError below), not a silent ignore
+   * — unlike most flags here, a wrong --plan value would silently mislabel
+   * a real dollar comparison, so it fails loud instead.
+   */
+  plan?: number;
+  /**
+   * --branch-override <api-5m|api-1h|subscription> (v1.0.2): HIDDEN dev-only
+   * flag, not documented in README (see this file's top comment and
+   * CONTRIBUTING.md's "Previewing the other endings"). Forces buildSummary's
+   * existing branchOverride seam — see verdict.ts — from the CLI instead of
+   * from the interactive ambiguous-branch question, so a maintainer can
+   * preview any of the three endings against their OWN real corpus for
+   * screenshots/QA. Validated at parse time like --plan.
+   */
+  branchOverride?: Branch;
 }
 
 const SUBCOMMANDS = new Set<Subcommand>(["card", "enable", "revert", "verify", "recheck", "share"]);
+const BRANCH_OVERRIDE_VALUES: ReadonlySet<Branch> = new Set(["api-5m", "api-1h", "subscription"]);
+
+/**
+ * A clean, stack-trace-free CLI usage error: caught in main(), printed as
+ * `cache-refund: <message>` on stderr, exit 2 — never the generic top-level
+ * catch-all (which prints err.stack, appropriate for a genuine bug, not a
+ * typo'd flag value).
+ */
+class UsageError extends Error {}
+
+function describeArg(raw: string | undefined): string {
+  return raw === undefined ? "nothing" : JSON.stringify(raw);
+}
 
 function parseArgs(argv: string[]): Args {
   const args: Args = {
@@ -159,6 +203,25 @@ function parseArgs(argv: string[]): Args {
       case "--price":
         args.overrides = parsePriceOverride(argv[++i] ?? "");
         break;
+      case "--plan": {
+        const raw = argv[++i];
+        const v = Number(raw);
+        if (raw === undefined || !Number.isFinite(v) || v <= 0) {
+          throw new UsageError(`--plan requires a positive USD amount, e.g. --plan 200 (got ${describeArg(raw)})`);
+        }
+        args.plan = v;
+        break;
+      }
+      case "--branch-override": {
+        const raw = argv[++i];
+        if (raw === undefined || !BRANCH_OVERRIDE_VALUES.has(raw as Branch)) {
+          throw new UsageError(
+            `--branch-override must be one of api-5m, api-1h, subscription (got ${describeArg(raw)})`,
+          );
+        }
+        args.branchOverride = raw as Branch;
+        break;
+      }
       default:
         // Unknown flags are ignored rather than fatal — a screenshot tool
         // shouldn't crash on a typo'd flag; --json output is still valid.
@@ -233,7 +296,7 @@ function promptLine(question: string): Promise<string> {
  * the user's own browser with prefilled text they read before posting; [c]
  * uses the local clipboard tool.
  */
-async function maybeSharePrompt(summary: Summary, noShare: boolean): Promise<void> {
+async function maybeSharePrompt(summary: Summary, noShare: boolean, planPrice?: number): Promise<void> {
   if (noShare || noShareEnvSet()) return;
   const interactive = process.stdout.isTTY && !process.env.CI;
   if (!interactive) return;
@@ -243,36 +306,19 @@ async function maybeSharePrompt(summary: Summary, noShare: boolean): Promise<voi
   if (answer === "x" || answer === "b") {
     const text = shareTemplate(summary);
     const url = answer === "x" ? xIntentUrl(text) : bskyIntentUrl(text);
-    const opened = await openExternal(url);
-    if (!opened) {
-      process.stdout.write(`couldn't launch a browser — open this yourself:\n${url}\n`);
-    }
     // Generated share image (v1.0.2, replaces the screenshot ask): write the
     // SVG card (+ best-effort PNG on darwin — X attachments need a raster),
-    // then best-effort put the IMAGE ITSELF on the clipboard so the post is
-    // paste-ready (Cmd+V) — no manual attach step. Reveal-in-Finder
-    // (`open -R`, darwin only) is now reserved for the fallback path (no
-    // PNG, or the clipboard-image tool failed): a successful clipboard copy
-    // needs no Finder popup.
-    try {
-      const { svgPath, pngPath } = writeCardImage(summary);
-      const file = pngPath ?? svgPath;
-      const clipped = pngPath ? await copyImageToClipboard(pngPath) : false;
-      if (clipped) {
-        process.stdout.write("card image copied to your clipboard — paste it into the post (Cmd+V)\n");
-      } else {
-        revealFile(file);
-        process.stdout.write(`card image saved: ${file} — attach it to the post\n`);
-        if (!pngPath) {
-          process.stdout.write(
-            "(png conversion unavailable — svg attached tools may not accept; screenshot the card above as backup)\n",
-          );
-        }
-      }
-    } catch {
-      // Image generation is a convenience — never let it break the share flow.
-      process.stdout.write("(couldn't write the card image — screenshot the card above instead)\n");
-    }
+    // best-effort put the IMAGE ITSELF on the clipboard so the post is
+    // paste-ready (Cmd+V), and print the tip — ALL BEFORE opening the
+    // browser (see share.ts's runShareAccept: opening the browser first used
+    // to steal terminal focus before the clipboard tip ever printed).
+    await runShareAccept(url, {
+      writeCardImage: () => writeCardImage(summary, { planPrice }),
+      copyImageToClipboard,
+      revealFile,
+      openExternal,
+      write: (s) => process.stdout.write(s),
+    });
     return;
   }
   if (answer === "c") {
@@ -308,7 +354,16 @@ function promptBranch(): Promise<Branch> {
 // ------------------------------------------------------------------ main
 
 async function main(): Promise<number> {
-  const args = parseArgs(process.argv.slice(2));
+  let args: Args;
+  try {
+    args = parseArgs(process.argv.slice(2));
+  } catch (err) {
+    if (err instanceof UsageError) {
+      process.stderr.write(`cache-refund: ${err.message}\n`);
+      return 2;
+    }
+    throw err;
+  }
   const tty = isInteractiveTty(args);
   const color = useColor(args, tty);
   const ink = makeInk(color);
@@ -351,6 +406,12 @@ async function main(): Promise<number> {
     allTime: args.allTime,
     jsonMode: true,
     overrides: args.overrides,
+    // Hidden dev flag (see Args.branchOverride): forces the branch on the
+    // REAL corpus below, before the ambiguous-branch check even runs — the
+    // interactive question never fires when this is set (branch is never
+    // "ambiguous" once overridden).
+    branchOverride: args.branchOverride,
+    branchOverrideSource: args.branchOverride ? "flag" : undefined,
     onFileParsed: progress
       ? (done, total) => {
           const p = progress!.frame(done, total);
@@ -410,7 +471,7 @@ async function dispatch(
   summary: Summary,
   renderOpts: { tty: boolean; color: boolean },
 ): Promise<number> {
-  const opts = { tty: renderOpts.tty, noColor: !renderOpts.color, showProjects: args.projects };
+  const opts = { tty: renderOpts.tty, noColor: !renderOpts.color, showProjects: args.projects, planPrice: args.plan };
 
   // --json always wins (stable machine-readable schema).
   if (args.json) {
@@ -428,7 +489,7 @@ async function dispatch(
       // (there's no frequency guard to bypass anymore — see maybeSharePrompt
       // — running `share` just asks, same as any other checkup end).
       process.stdout.write(renderCard(summary, opts) + "\n");
-      await maybeSharePrompt(summary, args.noShare);
+      await maybeSharePrompt(summary, args.noShare, args.plan);
       return 0;
 
     // "enable" / "revert" never reach this switch: non-json runs are
@@ -448,7 +509,7 @@ async function dispatch(
       process.stdout.write(res.message.join("\n") + "\n");
       if ((res.savedSinceEnable ?? 0) > 0) {
         // High-emotion re-ask moment #2: a receipt showing positive savings.
-        await maybeSharePrompt(summary, args.noShare);
+        await maybeSharePrompt(summary, args.noShare, args.plan);
       }
       return 0;
     }
@@ -463,7 +524,7 @@ async function dispatch(
 async function renderCheckup(
   args: Args,
   summary: Summary,
-  opts: { tty: boolean; noColor: boolean },
+  opts: { tty: boolean; noColor: boolean; planPrice?: number },
 ): Promise<number> {
   if (args.md) {
     process.stdout.write(renderMarkdown(summary) + "\n");
@@ -496,16 +557,21 @@ async function renderCheckup(
   // figure already lands there. Non-TTY/CI output is untouched (renderFull,
   // used by the !opts.tty branch above, still prints its box up top — see
   // render.ts's craft-laws comment: that snapshot must not change).
+  //
+  // Tail order (v1.0.2): ending -> closing card -> gap bars + verdict line
+  // -> share prompt. Gap bars moved from right after CHECKUP to right after
+  // the closing card, so the terminal's last frame mirrors the generated
+  // share image's own composition (cardimage.ts's buildCardSvg: hero block,
+  // then the gap-bars breakdown) — screenshot and card now read the same way.
   const ink = makeInk(!opts.noColor);
   // Reached only when opts.tty is true (see the !opts.tty branch above), so
   // this is always the Unicode table — ascii-ness tracks TTY-ness.
   const sym = makeSym(false);
   await staggerPrint(checkupLines(summary, ink, sym));
-  process.stdout.write("\n" + gapBars(summary, ink, false, sym).join("\n") + "\n\n");
-  process.stdout.write(wrappedLines(summary, ink, sym, args.projects).join("\n") + "\n\n");
+  process.stdout.write("\n" + wrappedLines(summary, ink, sym, args.projects).join("\n") + "\n\n");
 
   const kind = decideEnding(summary);
-  const ending = renderEnding(summary, kind, ink, sym);
+  const ending = renderEnding(summary, kind, ink, sym, opts.planPrice);
   process.stdout.write(ending.lines.join("\n") + "\n\n");
   process.stdout.write(shareRail(ink, sym, { closingCardFollows: true }).join("\n") + "\n");
 
@@ -514,14 +580,18 @@ async function renderCheckup(
   // Closing card (v1.0.2, TTY full checkup only): the run ends by dealing
   // your card — the exact `card` block re-printed as the final frame, so the
   // tail of the terminal IS the screenshot. After the rail (and any consent
-  // flow, which would otherwise push it up), before the share prompt.
+  // flow, which would otherwise push it up), before the gap bars.
   // Non-TTY/CI output is unchanged (this is the TTY branch only).
   process.stdout.write("\n" + renderCard(summary, opts) + "\n");
 
-  // Share CTA, after the closing card (TTY path only — the non-TTY branch
+  // Gap bars + verdict line (moved here, v1.0.2 — see the tail-order comment
+  // above), after the closing card, before the share prompt.
+  process.stdout.write("\n" + gapBars(summary, ink, false, sym).join("\n") + "\n");
+
+  // Share CTA, after the gap bars (TTY path only — the non-TTY branch
   // above never prompts). Fires every time (see maybeSharePrompt) unless
   // suppressed by --no-share / CACHE_REFUND_NO_SHARE.
-  await maybeSharePrompt(summary, args.noShare);
+  await maybeSharePrompt(summary, args.noShare, args.plan);
   return code;
 }
 
@@ -586,6 +656,8 @@ async function runStandaloneAction(args: Args): Promise<number> {
       allTime: args.allTime,
       jsonMode: true,
       overrides: args.overrides,
+      branchOverride: args.branchOverride,
+      branchOverrideSource: args.branchOverride ? "flag" : undefined,
     });
     summary = r.summary ?? undefined;
   } catch {
@@ -596,7 +668,7 @@ async function runStandaloneAction(args: Args): Promise<number> {
   if (res.applied && summary) {
     // High-emotion re-ask moment #1 (standalone `enable` route). Skipped
     // when no Summary exists (empty corpus) — no numbers to fill a template.
-    await maybeSharePrompt(summary, args.noShare);
+    await maybeSharePrompt(summary, args.noShare, args.plan);
   }
   return 0;
 }
@@ -636,7 +708,7 @@ async function maybeConsentFromEnding(
   process.stdout.write("\n" + res.message.join("\n") + "\n");
   if (res.applied && consentVerb === "enable") {
     // High-emotion re-ask moment #1: right after a successful enable.
-    await maybeSharePrompt(summary, args.noShare);
+    await maybeSharePrompt(summary, args.noShare, args.plan);
   }
   return 0;
 }

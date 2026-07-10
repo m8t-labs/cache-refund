@@ -153,6 +153,7 @@ exports[`snapshots (ANSI-stripped) > card, all three fixtures 1`] = `
 |                                                       |
 |                  leaking real money                   |
 |              205.0M tokens - 42 sessions              |
+|              absorbed $779 of API-value               |
 +-------------------------------------------------------+
 
   > Worst day: 2026-06-28 leaked $62.40 (3.1M tokens) to expired cache.
@@ -168,6 +169,7 @@ exports[`snapshots (ANSI-stripped) > card, all three fixtures 2`] = `
 |                                                       |
 |                   certified optimal                   |
 |              360.0M tokens - 80 sessions              |
+|              absorbed $834 of API-value               |
 +-------------------------------------------------------+
 
   > Worst day: 2026-06-15 leaked $4.10 (410K tokens) to expired cache.
@@ -183,6 +185,7 @@ exports[`snapshots (ANSI-stripped) > card, all three fixtures 3`] = `
 |                                                       |
 |             efficiency score: 98.5 / 100              |
 |              15.0B tokens - 590 sessions              |
+|             absorbed $33,866 of API-value             |
 +-------------------------------------------------------+
 
   > Model switches invalidated 70.3M tokens of cache ($513.86-eq).
@@ -205,6 +208,7 @@ CHECKUP
 |                                                       |
 |                  leaking real money                   |
 |              205.0M tokens - 42 sessions              |
+|              absorbed $779 of API-value               |
 +-------------------------------------------------------+
 
 GAP BREAKDOWN (cache-write tokens by re-warm gap)
@@ -252,6 +256,7 @@ CHECKUP
 |                                                       |
 |                   certified optimal                   |
 |              360.0M tokens - 80 sessions              |
+|              absorbed $834 of API-value               |
 +-------------------------------------------------------+
 
 GAP BREAKDOWN (cache-write tokens by re-warm gap)
@@ -300,6 +305,7 @@ CHECKUP
 |                                                       |
 |             efficiency score: 98.5 / 100              |
 |              15.0B tokens - 590 sessions              |
+|             absorbed $33,866 of API-value             |
 +-------------------------------------------------------+
 
 GAP BREAKDOWN (cache-write tokens by re-warm gap)
@@ -322,6 +328,8 @@ Your 1h cache saved you ~$2,500.95 USD-equivalent (API list rates) vs a 5m world
 in the last 90 days.
 Caching saved you $33,866.02 USD-equivalent (API list rates) vs uncached this
 window.
+Subscription usage is metered at API-value rates - that's how a $-priced plan
+absorbs this much, and why your limits stretch as far as they do.
 1h already yours, verified in your transcripts: 99.5% of writes are 1h OK
 
 QUOTA-LEAK LIST ($-equivalent, API list rates - not a bill)

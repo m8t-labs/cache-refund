@@ -22,6 +22,8 @@ export interface RunOptions {
   home?: string;
   /** See verdict.ts BuildSummaryInput.branchOverride. */
   branchOverride?: Branch;
+  /** See verdict.ts BuildSummaryInput.branchOverrideSource. */
+  branchOverrideSource?: "interactive" | "flag";
   /**
    * Additive (v1.0.1): live-progress hook for the CLI's in-place scan
    * counter — called after each transcript file finishes parsing with
@@ -77,6 +79,7 @@ export async function run(opts: RunOptions): Promise<RunResult> {
     jsonMode: opts.jsonMode === true,
     ctx,
     branchOverride: opts.branchOverride,
+    branchOverrideSource: opts.branchOverrideSource,
   });
 
   return { summary, fileCount: files.length, code: 0 };

@@ -23,8 +23,10 @@ import {
   imageClipboardCommandsFor,
   noShareEnvSet,
   openCommandFor,
+  runShareAccept,
   SHARE_PROMPT_LINE,
   xIntentUrl,
+  type ShareAcceptDeps,
   type SpawnLike,
 } from "../src/share.js";
 
@@ -204,5 +206,111 @@ describe("image clipboard (v1.0.2): command construction + fallback chain", () =
     const ok = await copyImageToClipboard("/tmp/card.png", "linux", pipingSpawn, () => bytes);
     expect(ok).toBe(true);
     expect(piped).toEqual(bytes);
+  });
+});
+
+describe("runShareAccept (v1.0.2 reorder): image + clipboard + tip land before the browser opens", () => {
+  const URL = "https://x.com/intent/post?text=hi";
+
+  /**
+   * Builds a ShareAcceptDeps that records every call (name + key arg) into
+   * `calls`, in order — including when a scenario knob makes it throw or
+   * return false. Every dep is always call-recorded regardless of the knobs,
+   * so `calls` is a complete, order-faithful trace of what runShareAccept did.
+   */
+  function recordingDeps(
+    opts: { pngPath?: string | null; clipboardOk?: boolean; openOk?: boolean; throwOnWrite?: boolean } = {},
+  ): { calls: string[]; deps: ShareAcceptDeps } {
+    const { pngPath = "/tmp/card.png", clipboardOk = true, openOk = true, throwOnWrite = false } = opts;
+    const calls: string[] = [];
+    const deps: ShareAcceptDeps = {
+      writeCardImage: () => {
+        calls.push("writeCardImage");
+        if (throwOnWrite) throw new Error("boom");
+        return { svgPath: "/tmp/card.svg", pngPath };
+      },
+      copyImageToClipboard: async (path) => {
+        calls.push(`copyImageToClipboard:${path}`);
+        return clipboardOk;
+      },
+      revealFile: (path) => {
+        calls.push(`revealFile:${path}`);
+      },
+      openExternal: async (url) => {
+        calls.push(`openExternal:${url}`);
+        return openOk;
+      },
+      write: (s) => {
+        calls.push(`write:${s}`);
+      },
+    };
+    return { calls, deps };
+  }
+
+  it("success path: writeCardImage -> copyImageToClipboard -> the clipboard tip -> THEN openExternal, in that order", async () => {
+    const { calls, deps } = recordingDeps();
+    await runShareAccept(URL, deps);
+    expect(calls).toEqual([
+      "writeCardImage",
+      "copyImageToClipboard:/tmp/card.png",
+      "write:card image on your clipboard — Cmd+V into the post\n",
+      `openExternal:${URL}`,
+    ]);
+  });
+
+  it("clipboard copy failed: reveals + prints the saved-path line, still entirely before the open", async () => {
+    const { calls, deps } = recordingDeps({ clipboardOk: false });
+    await runShareAccept(URL, deps);
+    expect(calls).toEqual([
+      "writeCardImage",
+      "copyImageToClipboard:/tmp/card.png",
+      "revealFile:/tmp/card.png",
+      "write:card image saved: /tmp/card.png — attach it to the post\n",
+      `openExternal:${URL}`,
+    ]);
+  });
+
+  it("no PNG (svg-only): notes png-unavailable and never calls copyImageToClipboard, still before the open", async () => {
+    const { calls, deps } = recordingDeps({ pngPath: null });
+    await runShareAccept(URL, deps);
+    expect(calls).toEqual([
+      "writeCardImage",
+      "revealFile:/tmp/card.svg",
+      "write:card image saved: /tmp/card.svg — attach it to the post\n",
+      "write:(png conversion unavailable — svg attached tools may not accept; screenshot the card above as backup)\n",
+      `openExternal:${URL}`,
+    ]);
+  });
+
+  it("image write throws: prints the fallback note (never touches clipboard/reveal), still opens the browser after", async () => {
+    const { calls, deps } = recordingDeps({ throwOnWrite: true });
+    await runShareAccept(URL, deps);
+    expect(calls).toEqual([
+      "writeCardImage",
+      "write:(couldn't write the card image — screenshot the card above instead)\n",
+      `openExternal:${URL}`,
+    ]);
+  });
+
+  it("browser fails to open: the manual-open fallback line prints AFTER the clipboard tip, with the URL", async () => {
+    const { calls, deps } = recordingDeps({ openOk: false });
+    await runShareAccept(URL, deps);
+    expect(calls).toEqual([
+      "writeCardImage",
+      "copyImageToClipboard:/tmp/card.png",
+      "write:card image on your clipboard — Cmd+V into the post\n",
+      `openExternal:${URL}`,
+      `write:couldn't launch a browser — open this yourself:\n${URL}\n`,
+    ]);
+  });
+
+  it("the clipboard tip is always the LAST write before openExternal is called (focus-steal fix)", async () => {
+    const { calls, deps } = recordingDeps();
+    await runShareAccept(URL, deps);
+    const lastWriteIdx = calls.map((c) => c.startsWith("write:")).lastIndexOf(true);
+    const openIdx = calls.findIndex((c) => c.startsWith("openExternal:"));
+    expect(lastWriteIdx).toBeGreaterThanOrEqual(0);
+    expect(openIdx).toBeGreaterThanOrEqual(0);
+    expect(lastWriteIdx).toBeLessThan(openIdx);
   });
 });

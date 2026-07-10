@@ -9,12 +9,16 @@
 import { describe, expect, it } from "vitest";
 import { stripAnsi, boxWidth, makeInk, makeSym } from "../src/format.js";
 import {
+  absorbedDollars,
   checkupLines,
   decideEnding,
+  fmtAbsorbed,
   makeScanProgress,
   numberBox,
+  planMultiplierLine,
   renderCard,
   renderCompact,
+  renderEnding,
   renderExplain,
   renderFull,
   renderMarkdown,
@@ -565,6 +569,129 @@ describe("scale line + card share hint (v1.0.1)", () => {
     expect(compact).toContain("share: npx cache-refund card");
     const card = stripAnsi(renderCard(fixtureEndingCReceipt, NON_TTY));
     expect(card).toContain("share: npx cache-refund card");
+  });
+});
+
+describe("absorbedDollars / fmtAbsorbed (v1.0.2: the absorbed-value flex line)", () => {
+  it("positive delta rounds to the dollar, comma-grouped, matching uncachedCost - actualCost", () => {
+    // Hand-verified against each fixture's perModel (uncachedCost) and
+    // counterfactual.actualCost: A = 1025.0 - 246.25 = 778.75 -> 779;
+    // B = 1080.0 - 246.0 = 834.0 -> 834; C = 50511.75... - 16645.73... -> 33866.
+    expect(absorbedDollars(fixtureEndingAEnable)).toBe(779);
+    expect(absorbedDollars(fixtureEndingBOptimal)).toBe(834);
+    expect(absorbedDollars(fixtureEndingCReceipt)).toBe(33866);
+  });
+  it("non-positive delta (caching cost MORE than uncached) omits — null, never a negative figure", () => {
+    expect(absorbedDollars(fixtureNegativeCachingSavings)).toBeNull();
+    expect(absorbedDollars(fixtureNegativeCachingSavingsEndingB)).toBeNull();
+  });
+  it("fmtAbsorbed: long form says 'of API-value'; short form drops the 'of'", () => {
+    expect(fmtAbsorbed(69617)).toBe("absorbed $69,617 of API-value");
+    expect(fmtAbsorbed(69617, true)).toBe("absorbed $69,617 API-value");
+  });
+  it("the box carries the long form for every ending, on a positive fixture", () => {
+    for (const s of [fixtureEndingAEnable, fixtureEndingBOptimal, fixtureEndingCReceipt]) {
+      const rendered = stripAnsi(numberBox(s, makeInk(false), makeSym(true)));
+      expect(rendered).toContain(fmtAbsorbed(absorbedDollars(s)!));
+    }
+  });
+  it("the box OMITS the line entirely for the negative-delta fixtures — no line, not a negative one", () => {
+    for (const s of [fixtureNegativeCachingSavings, fixtureNegativeCachingSavingsEndingB]) {
+      const rendered = stripAnsi(numberBox(s, makeInk(false), makeSym(true)));
+      expect(rendered).not.toContain("absorbed $");
+    }
+  });
+  it("a pathologically large absorbed figure shortens to the box-safe form rather than ever widening the box", () => {
+    const monster = {
+      ...fixtureEndingCReceipt,
+      perModel: [{ ...fixtureEndingCReceipt.perModel[0], basePrice: 1e15, creation5m: 1e16, creation1h: 0, read: 0 }],
+    };
+    const absorbed = absorbedDollars(monster);
+    expect(absorbed).not.toBeNull();
+    const long = fmtAbsorbed(absorbed!, false);
+    // Sanity: this case actually exercises the fallback (long form alone
+    // would blow the box's width law) — otherwise this test proves nothing.
+    expect(long.length).toBeGreaterThan(boxWidth - 2);
+    const rendered = stripAnsi(numberBox(monster, makeInk(false), makeSym(true)));
+    for (const line of rendered.split("\n")) {
+      expect(line.length).toBe(boxWidth);
+    }
+    expect(rendered).toContain(fmtAbsorbed(absorbed!, true));
+    expect(rendered).not.toContain(fmtAbsorbed(absorbed!, false));
+  });
+});
+
+describe("subscriber paradox explainer (v1.0.2, ending C only)", () => {
+  it("renders right after the vs-uncached line, before verification", () => {
+    const { lines } = renderFull(fixtureEndingCReceipt, NON_TTY);
+    const flat = stripAnsi(lines.join("\n")).replace(/\n/g, " ");
+    expect(flat).toContain(
+      "Subscription usage is metered at API-value rates - that's how a $-priced plan absorbs this much, and why your limits stretch as far as they do.",
+    );
+    const iUncached = flat.indexOf("vs uncached this window");
+    const iParadox = flat.indexOf("Subscription usage is metered");
+    const iVerify = flat.indexOf("of writes are 1h");
+    expect(iParadox).toBeGreaterThan(iUncached);
+    expect(iVerify).toBeGreaterThan(iParadox);
+  });
+  it("never appears on A/B endings", () => {
+    for (const s of [fixtureEndingAEnable, fixtureEndingBOptimal]) {
+      const { lines } = renderFull(s, NON_TTY);
+      expect(stripAnsi(lines.join("\n"))).not.toContain("Subscription usage is metered");
+    }
+  });
+});
+
+describe("planMultiplierLine / --plan (v1.0.2)", () => {
+  it("subscription + a positive absorbed figure -> one-decimal multiplier, ASCII-safe (~ and x, not ≈/×)", () => {
+    // Monthly-vs-monthly: absorbed ($33,866 over an 84-day span) is normalized
+    // to 30 days before dividing by the monthly plan price.
+    const line = planMultiplierLine(fixtureEndingCReceipt, 2000);
+    expect(line).toBe("~6.0x your monthly plan, absorbed for free");
+    expect(line).toMatch(/^~[\d.]+x your monthly plan, absorbed for free$/);
+  });
+  it("planPrice undefined -> null (line omitted)", () => {
+    expect(planMultiplierLine(fixtureEndingCReceipt, undefined)).toBeNull();
+  });
+  it("non-subscription branch -> null, even with a planPrice set", () => {
+    expect(planMultiplierLine(fixtureEndingAEnable, 200)).toBeNull();
+    expect(planMultiplierLine(fixtureEndingBOptimal, 200)).toBeNull();
+  });
+  it("no positive absorbed figure -> null, even on the subscription branch with a planPrice", () => {
+    expect(planMultiplierLine(fixtureNegativeCachingSavings, 200)).toBeNull();
+  });
+  it("renders on the receipt prose (via renderEnding) and the box when applicable", () => {
+    const ending = renderEnding(fixtureEndingCReceipt, "C", makeInk(false), makeSym(true), 2000);
+    expect(ending.lines.join(" ")).toContain("your monthly plan, absorbed for free");
+    const box = stripAnsi(numberBox(fixtureEndingCReceipt, makeInk(false), makeSym(true), 2000));
+    expect(box).toContain("your monthly plan, absorbed for free");
+  });
+  it("does NOT render on API-branch endings even with a planPrice (branch-gated)", () => {
+    const { lines } = renderFull(fixtureEndingAEnable, { tty: false, planPrice: 200 });
+    expect(stripAnsi(lines.join("\n"))).not.toContain("your monthly plan");
+  });
+  it("box row order: scale line, then absorbed, then the plan multiplier", () => {
+    const rendered = stripAnsi(numberBox(fixtureEndingCReceipt, makeInk(false), makeSym(true), 2000));
+    const rows = rendered.split("\n");
+    const iScale = rows.findIndex((l) => l.includes("tokens") && l.includes("sessions"));
+    const iAbsorbed = rows.findIndex((l) => l.includes("absorbed $"));
+    const iPlan = rows.findIndex((l) => l.includes("your monthly plan"));
+    expect(iScale).toBeGreaterThan(-1);
+    expect(iAbsorbed).toBeGreaterThan(iScale);
+    expect(iPlan).toBeGreaterThan(iAbsorbed);
+  });
+  it("width law holds with the --plan line engaged (subscription fixture)", () => {
+    const rendered = stripAnsi(numberBox(fixtureEndingCReceipt, makeInk(false), makeSym(true), 2000));
+    for (const line of rendered.split("\n")) {
+      expect(line.length).toBe(boxWidth);
+    }
+  });
+  it("renderFull(--plan) stays byte-clean ASCII on non-TTY (tilde/lowercase-x, not ≈/×)", () => {
+    const { lines } = renderFull(fixtureEndingCReceipt, { tty: false, planPrice: 2000 });
+    const text = lines.join("\n");
+    // eslint-disable-next-line no-control-regex
+    const nonAscii = [...new Set([...text].filter((c) => c.codePointAt(0)! > 127))];
+    expect(nonAscii).toEqual([]);
   });
 });
 

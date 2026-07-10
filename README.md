@@ -153,8 +153,9 @@ npx cache-refund --explain  # every formula, your numbers substituted (METHODOLO
 Flags: `--days N` (default 90) · `--project <path>` (default: all projects) ·
 `--price <model=$/MTok,...>` (override pricing) · `--yes` / `-y` (skip confirm) ·
 `--no-color` · `--all-time` · `--no-share` (silence the share prompt; same as
-env `CACHE_REFUND_NO_SHARE=1`). Exit codes: `0` ok · `1` no transcripts found ·
-`2` parse/internal error.
+env `CACHE_REFUND_NO_SHARE=1`) · `--plan <usd>` (monthly subscription price;
+subscription branch only — turns the receipt into a multiple of that price).
+Exit codes: `0` ok · `1` no transcripts found · `2` parse/usage/internal error.
 
 ## FAQ
 
@@ -164,7 +165,8 @@ automatically; `cache-refund` shows you what it saved you and where your quota i
 still leaking (model switches, cold starts). Dollar figures are labeled
 `$-equivalent (API list rates)` because the subscription quota formula is
 undisclosed — we price your tokens at API list rates so the number is *anchored
-and reproducible*, but it is not a bill.
+and reproducible*, but it is not a bill. The `--plan <usd>` flag turns the
+receipt into a multiple of your subscription price.
 
 **Does it work on Bedrock / Vertex?**
 Yes. `ENABLE_PROMPT_CACHING_1H` is an API/Bedrock/Vertex/Foundry feature, so the

@@ -11,11 +11,15 @@
  *   share rail
  *
  * This is renderFull()'s order, used byte-for-byte by the non-TTY/CI path
- * (box included, up top). The TTY-interactive checkup (cli.ts's
- * renderCheckup) reuses these same section functions directly but SKIPS THE
- * BOX here (v1.0.2) — it prints only once, at the very end, as the closing
- * card (a renderCard() call after the ending) so the tail of the terminal is
- * the one screenshot-worthy frame.
+ * (box included, up top; snapshot-pinned, never reordered). The
+ * TTY-interactive checkup (cli.ts's renderCheckup) reuses these same section
+ * functions directly but reshuffles the tail (v1.0.2): it SKIPS THE BOX up
+ * top and instead prints, in order, the ending, the closing card (a
+ * renderCard() call — the one screenshot-worthy box), THEN the gap bars +
+ * verdict line, then the share prompt. Bars-after-card mirrors the
+ * generated share image's own composition (cardimage.ts's buildCardSvg:
+ * hero block, then the gap-bars breakdown) — the terminal's last frame and
+ * the image you'd attach now read in the same order.
  *
  * Plus alternate render modes: card (score box + top Wrapped line), --md
  * (plain markdown, zero ANSI), --compact (~15 lines), --explain (formulas
@@ -39,6 +43,7 @@
 import type { LeakRow, Summary } from "./types.js";
 import {
   box,
+  boxWidth,
   fmtBar,
   fmtBarAscii,
   fmtDollars,
@@ -48,6 +53,7 @@ import {
   makeInk,
   makeSym,
   stripAnsi,
+  type BoxLine,
   type Ink,
   type Sym,
   wrapLine,
@@ -68,6 +74,15 @@ export interface RenderOptions {
    * names. `--json` is machine mode and keeps its project fields regardless.
    */
   showProjects?: boolean;
+  /**
+   * `--plan <usd>` (monthly subscription price), display-only and CLI-supplied
+   * — never part of Summary, never affects any computed figure. When set AND
+   * the branch is subscription, renders the "~Nx your monthly plan, absorbed
+   * for free" line (see planMultiplierLine) on the receipt prose and the box.
+   * Undefined (the default) omits the line, same as any non-subscription
+   * branch.
+   */
+  planPrice?: number;
 }
 
 const BRAND = "cache-refund";
@@ -249,7 +264,28 @@ function scaleLine(s: Summary, sym: Sym): string {
   return `${fmtTokensCompact(total)} tokens ${sym.dot} ${s.scope.sessions.toLocaleString()} sessions`;
 }
 
-export function numberBox(s: Summary, ink: Ink, sym: Sym): string {
+/**
+ * The box's scale-line row, plus up to two optional dim rows under it: the
+ * absorbed-dollars flex (absorbedDollars, positive-only) and the `--plan`
+ * multiplier (planMultiplierLine, subscription-branch-only). Both are
+ * width-law-checked here — see format.ts's box() width law (<=57 cols
+ * total, BOX_INNER visible chars) — so a pathological dollar figure shortens
+ * its wording rather than ever widening the box.
+ */
+function scaleRows(s: Summary, ink: Ink, sym: Sym, planPrice?: number): BoxLine[] {
+  const rows: BoxLine[] = [{ text: ink.dim(scaleLine(s, sym)) }];
+  const absorbed = absorbedDollars(s);
+  if (absorbed !== null) {
+    const long = fmtAbsorbed(absorbed, false);
+    const text = long.length <= boxWidth - 2 ? long : fmtAbsorbed(absorbed, true);
+    rows.push({ text: ink.dim(text) });
+  }
+  const plan = planMultiplierLine(s, planPrice);
+  if (plan !== null) rows.push({ text: ink.dim(plan) });
+  return rows;
+}
+
+export function numberBox(s: Summary, ink: Ink, sym: Sym, planPrice?: number): string {
   const kind = decideEnding(s);
   const score = s.efficiencyScore.toFixed(1);
 
@@ -270,7 +306,7 @@ export function numberBox(s: Summary, ink: Ink, sym: Sym): string {
         { text: figColor(ink.bold(fig)) },
         { text: "" },
         { text: ink.dim(`efficiency score: ${score} / 100`) },
-        { text: ink.dim(scaleLine(s, sym)) },
+        ...scaleRows(s, ink, sym, planPrice),
       ],
       sym.ascii,
       BOX_FRAME(ink),
@@ -285,7 +321,7 @@ export function numberBox(s: Summary, ink: Ink, sym: Sym): string {
       { text: scoreColor(ink.bold(`${score} / 100`)) },
       { text: "" },
       { text: ink.dim(scoreLabel(s.efficiencyScore, sym, kind)) },
-      { text: ink.dim(scaleLine(s, sym)) },
+      ...scaleRows(s, ink, sym, planPrice),
     ],
     sym.ascii,
     BOX_FRAME(ink),
@@ -457,7 +493,7 @@ export interface EndingRender {
   consentVerb?: "enable" | "revert";
 }
 
-export function renderEnding(s: Summary, kind: EndingKind, ink: Ink, sym: Sym): EndingRender {
+export function renderEnding(s: Summary, kind: EndingKind, ink: Ink, sym: Sym, planPrice?: number): EndingRender {
   switch (kind) {
     case "A-enable":
       return endingEnable(s, ink, sym);
@@ -466,7 +502,7 @@ export function renderEnding(s: Summary, kind: EndingKind, ink: Ink, sym: Sym): 
     case "B":
       return endingCertified(s, ink, sym);
     case "C":
-      return endingReceipt(s, ink, sym);
+      return endingReceipt(s, ink, sym, planPrice);
   }
 }
 
@@ -564,6 +600,65 @@ function uncachedCost(s: Summary): number {
 }
 
 /**
+ * The "absorbed $X of API-value" figure: the same uncachedCost - actualCost
+ * delta cachingSavedLine renders, rounded to the dollar (Math.round, no
+ * cents — a headline flex, not a ledger line, same discipline as
+ * cardimage.ts's fmtHeroDollars). Positive-only: mirrors cachingSavedLine's
+ * write-heavy/read-light subject (caching can genuinely cost more than
+ * uncached — see that function's comment) but OMITS rather than flips,
+ * since there is nothing to have "absorbed" when caching cost more. Exported
+ * so cardimage.ts's SVG card renders the exact same figure as the terminal
+ * box/prose, never a second, independently-drifting derivation.
+ */
+export function absorbedDollars(s: Summary): number | null {
+  const delta = uncachedCost(s) - s.counterfactual.actualCost;
+  return delta > 0 ? Math.round(delta) : null;
+}
+
+/**
+ * Format an already-computed absorbedDollars() figure. `short=true` drops
+ * the " of" for width-constrained callers (the box, when the long form would
+ * push a line past BOX_INNER — see scaleRows). Literal "API-value" wording
+ * rather than "-eq": the figure is ALWAYS priced at API list rates on every
+ * branch (see uncachedCost's per-model basePrice math), so no branch-specific
+ * qualifier is needed — subscriber output already carries the broader
+ * qualifier elsewhere (the receipt's currency line, the card's footer).
+ */
+export function fmtAbsorbed(n: number, short = false): string {
+  const amount = `$${n.toLocaleString("en-US")}`;
+  return short ? `absorbed ${amount} API-value` : `absorbed ${amount} of API-value`;
+}
+
+/**
+ * "~Nx your monthly plan, absorbed for free" (`--plan <usd>`, subscription
+ * branch only). The plan price is MONTHLY, so the absorbed figure must be
+ * normalized to a month before dividing — comparing a 90-day window's total
+ * against one month's fee would inflate N ~3x:
+ *
+ *   N = (absorbed / spanDays * 30) / planPrice, one decimal
+ *
+ * ASCII-safe tilde and lowercase "x" (not "≈"/"×") so this stays byte-clean
+ * on the non-TTY/CI path, matching every other approximate figure in this
+ * file (e.g. endingEnable's "saves ~$X/30d"). Single source of truth for
+ * this file's box + prose AND cardimage.ts's SVG card (imported there) —
+ * same figure, same wording, every surface. `planPrice` is CLI-supplied
+ * (--plan), never part of Summary — display-only, never affects any computed
+ * figure. Returns null (omit the line) when planPrice is unset, the branch
+ * isn't subscription, the span is too short to normalize (< 1 day), or
+ * there's no positive absorbed figure (mirrors absorbedDollars' omit rule).
+ */
+export function planMultiplierLine(s: Summary, planPrice: number | undefined): string | null {
+  if (planPrice === undefined || s.branch !== "subscription") return null;
+  const absorbed = absorbedDollars(s);
+  if (absorbed === null) return null;
+  const spanDays = s.counterfactual.spanDays;
+  if (!(spanDays >= 1)) return null;
+  const absorbedPerMonth = (absorbed / spanDays) * 30;
+  const n = absorbedPerMonth / planPrice;
+  return `~${n.toFixed(1)}x your monthly plan, absorbed for free`;
+}
+
+/**
  * "Caching saved you $X vs uncached" — but honestly: for a write-heavy,
  * read-light access pattern (small/synthetic corpora especially), caching
  * CAN cost more than not caching at all (every write pays a 1.25x/2x markup;
@@ -628,20 +723,38 @@ function receiptHeadline(s: Summary, sym: Sym): string {
   return `A 5m world would have cost ~${fmtDollars(delta)} ${s.currency} less ${windowLabel(s)} ${sym.dash} unusual for a subscription pattern.`;
 }
 
-function endingReceipt(s: Summary, ink: Ink, sym: Sym): EndingRender {
+/**
+ * The subscriber paradox explainer (right after the vs-uncached line): the
+ * receipt's headline dollar figures can look implausibly large next to a
+ * flat-priced plan — this line is the one-sentence "why" (subscription
+ * usage is metered at API list rates internally, which is also why the -eq
+ * figures are anchored/reproducible even though they're not a bill).
+ * Contains a prose em dash -> a function of `sym`, not a plain const (same
+ * discipline as watchTeaser above: non-TTY/CI must stay byte-clean ASCII).
+ */
+function subscriberParadoxLine(sym: Sym): string {
+  return `Subscription usage is metered at API-value rates ${sym.dash} that's how a $-priced plan absorbs this much, and why your limits stretch as far as they do.`;
+}
+
+function endingReceipt(s: Summary, ink: Ink, sym: Sym, planPrice?: number): EndingRender {
   const pctReceived1h = s.ttlRealityCheck.received === "1h";
   // Line 3 of the receipt: the TTL verification. Percentage is the 1h WRITE
   // SHARE for the analyzed window (oneHourWriteShare), not R/C.
   const verifyLine = pctReceived1h
     ? `1h already yours, verified in your transcripts: ${fmtPct(oneHourWriteShare(s))} of writes are 1h ${sym.check}`
     : `TTL received (last ${s.ttlRealityCheck.windowDays}d): ${s.ttlRealityCheck.received} ${sym.dash} subscriptions get 1h automatically; if you're seeing 5m, an overage likely dropped you to API rates.`;
+  const plan = planMultiplierLine(s, planPrice);
   const lines: string[] = [
     ink.bold("YOUR RECEIPT"),
     "",
     // Ordering is load-bearing (snapshot-tested):
-    // 1) the 1h-vs-5m counterfactual headline, 2) vs-uncached, 3) verification.
+    // 1) the 1h-vs-5m counterfactual headline, 2) vs-uncached, 3) the
+    // subscriber-paradox explainer (+ the optional --plan multiplier),
+    // 4) verification.
     ...wrapTerm(receiptHeadline(s, sym)).map((l) => ink.bold(l)),
     ...wrapTerm(cachingSavedLine(s, sym)),
+    ...wrapTerm(subscriberParadoxLine(sym)),
+    ...(plan !== null ? wrapTerm(plan) : []),
     ...wrapTerm(verifyLine),
     "",
     ink.bold("QUOTA-LEAK LIST") + ink.dim(` ($-equivalent, API list rates ${sym.dash} not a bill)`),
@@ -779,14 +892,14 @@ export function renderFull(s: Summary, opts: RenderOptions): FullRenderResult {
   const useAscii = !opts.tty;
   const sym = makeSym(!opts.tty);
   const kind = decideEnding(s);
-  const ending = renderEnding(s, kind, ink, sym);
+  const ending = renderEnding(s, kind, ink, sym, opts.planPrice);
 
   const lines: string[] = [];
   lines.push(trustLine(ink, sym));
   lines.push("");
   lines.push(...checkupLines(s, ink, sym));
   lines.push("");
-  lines.push(numberBox(s, ink, sym));
+  lines.push(numberBox(s, ink, sym, opts.planPrice));
   lines.push("");
   lines.push(...gapBars(s, ink, useAscii, sym));
   lines.push("");
@@ -806,7 +919,7 @@ export function renderCard(s: Summary, opts: RenderOptions): string {
   const ink = makeInk(opts.tty && !opts.noColor);
   const sym = makeSym(!opts.tty);
   const top = wrappedLines(s, ink, sym, opts.showProjects === true).slice(1, 2); // first insight line only (already prefixed with "  » ")
-  const lines = [numberBox(s, ink, sym), "", ...top, "", shareRail(ink, sym)[1]];
+  const lines = [numberBox(s, ink, sym, opts.planPrice), "", ...top, "", shareRail(ink, sym)[1]];
   return lines.join("\n");
 }
 

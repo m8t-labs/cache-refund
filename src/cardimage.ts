@@ -15,7 +15,11 @@
  * Ending-aware hero block (the one huge number, replaces v1's smaller
  * score-box figure): C leads with the API-value receipt delta, A with the
  * unclaimed-refund delta, B with the bare efficiency score — see
- * heroBlock() below.
+ * heroBlock() below. Two more dim, optional lines flex the scale further:
+ * "absorbed $X of API-value" under the stat row (any branch, positive-only)
+ * and "~Nx your monthly plan" under the hero sub-line (subscription + the
+ * `--plan <usd>` flag only) — both single-sourced from render.ts so the
+ * terminal card and this SVG never drift apart on the same figure.
  *
  * Share-safe rules (same as the terminal + share templates): NEVER project
  * names, no "-eq" jargon — subscriber figures say "in API-value" and the
@@ -31,7 +35,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { decideEnding, wrappedLines } from "./render.js";
+import { absorbedDollars, decideEnding, fmtAbsorbed, planMultiplierLine, wrappedLines } from "./render.js";
 import { fmtTokensCompact, makeInk, makeSym } from "./format.js";
 import type { Summary } from "./types.js";
 
@@ -135,8 +139,13 @@ function barWidth(pctRaw: number): number {
  * heroBlock(). Every substituted string is XML-escaped (composed lines are
  * escaped whole, matching the existing convention: build the text, then
  * escape it once, rather than escaping numeric pieces separately).
+ *
+ * `planPrice` (`--plan <usd>`, display-only, CLI-supplied) renders the
+ * "~Nx your monthly plan" line right under the hero sub-line when the
+ * branch is subscription — see render.ts's planMultiplierLine, the single
+ * source of truth this and the terminal box both format from.
  */
-export function buildCardSvg(s: Summary): string {
+export function buildCardSvg(s: Summary, planPrice?: number): string {
   const hero = heroBlock(s);
   const statLine = escapeXml(
     `efficiency ${s.efficiencyScore.toFixed(1)} / 100   ·   ` +
@@ -154,8 +163,27 @@ export function buildCardSvg(s: Summary): string {
   const pctRecText = escapeXml(`${pctRec.toFixed(1)}%`);
   const pctColdText = escapeXml(`${pctCold.toFixed(1)}%`);
 
+  // "~Nx your monthly plan" — under the hero sub-line, in the gap already
+  // there between it (y=240) and the stat row (y=292); omitted (no line,
+  // no gap left behind) when --plan wasn't passed or the branch isn't
+  // subscription (planMultiplierLine's own gate).
+  const plan = planMultiplierLine(s, planPrice);
+  const planSvgLine =
+    plan !== null
+      ? `\n  <text x="360" y="266" text-anchor="middle" class="t dim" font-size="14">${escapeXml(plan)}</text>`
+      : "";
+
+  // "absorbed $X of API-value" — under the stat row; omitted (no line, no
+  // gap left behind) when there's nothing positive to have absorbed
+  // (absorbedDollars' own omit rule — see render.ts).
+  const absorbed = absorbedDollars(s);
+  const absorbedSvgLine =
+    absorbed !== null
+      ? `\n  <text x="360" y="316" text-anchor="middle" class="t dim" font-size="14">${escapeXml(fmtAbsorbed(absorbed))}</text>`
+      : "";
+
   const footerSub = subscriber
-    ? `\n  <text x="360" y="690" text-anchor="middle" class="t dim" font-size="12">${escapeXml("$ figures are API-value (list rates) — not a bill")}</text>`
+    ? `\n  <text x="360" y="690" text-anchor="middle" class="t dim" font-size="12">${escapeXml("$ figures are API-value (list rates) — subscription usage is metered in it, not billed")}</text>`
     : "";
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="720" height="720" viewBox="0 0 720 720">
@@ -171,15 +199,15 @@ export function buildCardSvg(s: Summary): string {
   <text x="360" y="42" text-anchor="middle" class="t dim" font-size="13">npx cache-refund</text>
   <text x="360" y="130" text-anchor="middle" class="t dim" font-size="14" letter-spacing="3">${escapeXml(hero.overline)}</text>
   <text x="360" y="205" text-anchor="middle" class="t ${hero.heroClass}" font-size="68" font-weight="700">${escapeXml(hero.hero)}</text>
-  <text x="360" y="240" text-anchor="middle" class="t dim" font-size="16">${escapeXml(hero.sub)}</text>
-  <text x="360" y="292" text-anchor="middle" class="t txt" font-size="16">${statLine}</text>
-  <text x="80" y="345" class="t dim" font-size="12" letter-spacing="2">CACHE WRITES BY RE-WARM GAP</text>
-  <rect x="200" y="362" width="300" height="12" rx="6" fill="#232530"/><rect x="200" y="362" width="${barWidth(pctWarm)}" height="12" rx="6" fill="#3fd68f"/>
-  <text x="80" y="373" class="t dim" font-size="13">warm</text><text x="516" y="373" class="t txt" font-size="13">${pctWarmText}</text>
-  <rect x="200" y="384" width="300" height="12" rx="6" fill="#232530"/><rect x="200" y="384" width="${barWidth(pctRec)}" height="12" rx="6" fill="#e0b856"/>
-  <text x="80" y="395" class="t dim" font-size="13">recoverable</text><text x="516" y="395" class="t txt" font-size="13">${pctRecText}</text>
-  <rect x="200" y="406" width="300" height="12" rx="6" fill="#232530"/><rect x="200" y="406" width="${barWidth(pctCold)}" height="12" rx="6" fill="#949cb8"/>
-  <text x="80" y="417" class="t dim" font-size="13">cold</text><text x="516" y="417" class="t txt" font-size="13">${pctColdText}</text>
+  <text x="360" y="240" text-anchor="middle" class="t dim" font-size="16">${escapeXml(hero.sub)}</text>${planSvgLine}
+  <text x="360" y="292" text-anchor="middle" class="t txt" font-size="16">${statLine}</text>${absorbedSvgLine}
+  <text x="80" y="359" class="t dim" font-size="12" letter-spacing="2">CACHE WRITES BY RE-WARM GAP</text>
+  <rect x="200" y="376" width="300" height="12" rx="6" fill="#232530"/><rect x="200" y="376" width="${barWidth(pctWarm)}" height="12" rx="6" fill="#3fd68f"/>
+  <text x="80" y="387" class="t dim" font-size="13">warm</text><text x="516" y="387" class="t txt" font-size="13">${pctWarmText}</text>
+  <rect x="200" y="398" width="300" height="12" rx="6" fill="#232530"/><rect x="200" y="398" width="${barWidth(pctRec)}" height="12" rx="6" fill="#e0b856"/>
+  <text x="80" y="409" class="t dim" font-size="13">recoverable</text><text x="516" y="409" class="t txt" font-size="13">${pctRecText}</text>
+  <rect x="200" y="420" width="300" height="12" rx="6" fill="#232530"/><rect x="200" y="420" width="${barWidth(pctCold)}" height="12" rx="6" fill="#949cb8"/>
+  <text x="80" y="431" class="t dim" font-size="13">cold</text><text x="516" y="431" class="t txt" font-size="13">${pctColdText}</text>
   <text x="80" y="478" class="t" font-size="14"><tspan class="orange">›</tspan><tspan class="txt"> ${fact}</tspan></text>
   <rect x="80" y="530" width="560" height="64" rx="12" fill="#d75fd7" fill-opacity="0.10" stroke="#d75fd7" stroke-width="1.5"/>
   <text x="360" y="570" text-anchor="middle" class="t brand" font-size="22" font-weight="700">npx cache-refund</text>
@@ -201,6 +229,8 @@ export interface CardImageOpts {
   platform?: NodeJS.Platform;
   /** Injectable qlmanage runner (tests). */
   execFileSyncFn?: (cmd: string, args: string[]) => void;
+  /** `--plan <usd>`, threaded to buildCardSvg — see its doc comment. */
+  planPrice?: number;
 }
 
 /** Default output dir: ~/Downloads when present, else the current directory. */
@@ -221,7 +251,7 @@ export function writeCardImage(s: Summary, opts: CardImageOpts = {}): CardImageR
   const exec = opts.execFileSyncFn ?? ((cmd: string, args: string[]) => execFileSync(cmd, args, { stdio: "ignore" }));
 
   const svgPath = join(dir, `${CARD_BASENAME}.svg`);
-  writeFileSync(svgPath, buildCardSvg(s), "utf8");
+  writeFileSync(svgPath, buildCardSvg(s, opts.planPrice), "utf8");
 
   let pngPath: string | null = null;
   if (platform === "darwin") {

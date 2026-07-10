@@ -52,6 +52,27 @@ standard library.
   anything that adds a network call, and anything that writes to disk beyond the
   single confirmed `settings.json` enable/revert edit.
 
+## Previewing the other endings
+
+A given corpus only ever shows one of the three endings (recommender,
+validator, receipt) — the one your real detected branch earns. When a change
+touches rendering and you want to see all three without three different
+machines, force the branch with the hidden dev flag:
+
+```bash
+node dist/cli.js --branch-override api-5m       # the recommender ("enable 1h")
+node dist/cli.js --branch-override api-1h       # the validator ("keep 1h" / "revert")
+node dist/cli.js --branch-override subscription # the receipt
+```
+
+This re-runs the verdict logic for the forced branch on your **real**
+transcript numbers — buckets, costs, and leaks are still yours, only the
+billing-branch assumption (and therefore the ending) changes. The evidence
+trail says so plainly (`=> branch override (--branch-override)`), never
+claiming you answered the interactive branch question. It's a maintainer/QA
+tool for screenshots and rendering QA, not a supported flag — it isn't
+documented in the README.
+
 ## Working style
 
 - Match the existing TypeScript: strict, ESM, no runtime deps.
