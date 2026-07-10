@@ -755,3 +755,23 @@ describe("snapshots (ANSI-stripped)", () => {
     expect(renderExplain(fixtureEndingCReceipt)).toMatchSnapshot();
   });
 });
+
+describe("share template context: the just-claimed humblebrag (post-enable / recheck)", () => {
+  it("post-enable on ending A uses the lousy-card line with the monthly figure", () => {
+    const t = shareTemplate(fixtureEndingAEnable, "post-enable");
+    expect(t).toContain("just claimed a cache refund of");
+    expect(t).toContain("/month on our AI coding bill — and all I got was this lousy card.");
+    expect(t).toContain("npx cache-refund #cacherefund");
+    expect(t.length).toBeLessThanOrEqual(280);
+  });
+  it("recheck on ending A says 'saved my company' (receipts-backed)", () => {
+    const t = shareTemplate(fixtureEndingAEnable, "recheck");
+    expect(t).toContain("I saved my company ~$");
+    expect(t).toContain("lousy card");
+  });
+  it("checkup context and non-A endings are unchanged", () => {
+    expect(shareTemplate(fixtureEndingAEnable)).toContain("leaving on the table");
+    expect(shareTemplate(fixtureEndingCReceipt, "post-enable")).toContain("usage limit");
+    expect(shareTemplate(fixtureEndingCReceipt, "recheck")).not.toContain("lousy");
+  });
+});

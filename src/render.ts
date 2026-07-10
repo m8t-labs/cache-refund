@@ -848,12 +848,21 @@ function windowPhrase(s: Summary): string {
  *     (the ASCII law is a terminal law; these strings go to intent URLs
  *     and the clipboard).
  */
-export function shareTemplate(s: Summary): string {
+export function shareTemplate(s: Summary, context: "checkup" | "post-enable" | "recheck" = "checkup"): string {
   const kind = decideEnding(s);
   const cf = s.counterfactual;
   const score = s.efficiencyScore.toFixed(1);
   const tokens = fmtTokensCompact(s.tokens.creationTotal + s.tokens.readTotal);
   const sessions = s.scope.sessions.toLocaleString();
+
+  // The just-claimed moments get the t-shirt-meme humblebrag: the person who
+  // flipped the flag deserves the enterprise flex. delta30d = the monthly
+  // figure (projection at post-enable, receipts-backed at recheck).
+  if ((context === "post-enable" || context === "recheck") && (kind === "A-enable" || kind === "A-revert")) {
+    const monthly = fmtDollars(Math.abs(cf.delta30d), 0);
+    const verb = context === "recheck" ? "saved my company" : "just claimed a cache refund of";
+    return `I ${verb} ~${monthly}/month on our AI coding bill — and all I got was this lousy card. ${SHARE_CTA_TAIL}`;
+  }
 
   let full: string;
   let scaleClause: string;

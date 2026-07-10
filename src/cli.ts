@@ -296,7 +296,9 @@ function promptLine(question: string): Promise<string> {
  * the user's own browser with prefilled text they read before posting; [c]
  * uses the local clipboard tool.
  */
-async function maybeSharePrompt(summary: Summary, noShare: boolean, planPrice?: number): Promise<void> {
+type ShareContext = "checkup" | "post-enable" | "recheck";
+
+async function maybeSharePrompt(summary: Summary, noShare: boolean, planPrice?: number, context: ShareContext = "checkup"): Promise<void> {
   if (noShare || noShareEnvSet()) return;
   const interactive = process.stdout.isTTY && !process.env.CI;
   if (!interactive) return;
@@ -304,7 +306,7 @@ async function maybeSharePrompt(summary: Summary, noShare: boolean, planPrice?: 
   const answer = await promptLine(`\n${SHARE_PROMPT_LINE}`);
 
   if (answer === "x" || answer === "b") {
-    const text = shareTemplate(summary);
+    const text = shareTemplate(summary, context);
     const url = answer === "x" ? xIntentUrl(text) : bskyIntentUrl(text);
     // Generated share image (v1.0.2, replaces the screenshot ask): write the
     // SVG card (+ best-effort PNG on darwin — X attachments need a raster),
@@ -510,7 +512,7 @@ async function dispatch(
       process.stdout.write(res.message.join("\n") + "\n");
       if ((res.savedSinceEnable ?? 0) > 0) {
         // High-emotion re-ask moment #2: a receipt showing positive savings.
-        await maybeSharePrompt(summary, args.noShare, args.plan);
+        await maybeSharePrompt(summary, args.noShare, args.plan, "recheck");
       }
       return 0;
     }
@@ -669,7 +671,7 @@ async function runStandaloneAction(args: Args): Promise<number> {
   if (res.applied && summary) {
     // High-emotion re-ask moment #1 (standalone `enable` route). Skipped
     // when no Summary exists (empty corpus) — no numbers to fill a template.
-    await maybeSharePrompt(summary, args.noShare, args.plan);
+    await maybeSharePrompt(summary, args.noShare, args.plan, "post-enable");
   }
   return 0;
 }
@@ -709,7 +711,7 @@ async function maybeConsentFromEnding(
   process.stdout.write("\n" + res.message.join("\n") + "\n");
   if (res.applied && consentVerb === "enable") {
     // High-emotion re-ask moment #1: right after a successful enable.
-    await maybeSharePrompt(summary, args.noShare, args.plan);
+    await maybeSharePrompt(summary, args.noShare, args.plan, "post-enable");
   }
   return 0;
 }
