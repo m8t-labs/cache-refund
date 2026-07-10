@@ -87,8 +87,13 @@ export interface RenderOptions {
 
 const BRAND = "cache-refund";
 const METHODOLOGY_HINT = "methodology: npx cache-refund --explain";
-/** Contains the `dot` decoration -> a function of `sym`, not a plain const. */
-function shareHint(sym: Sym): string {
+/**
+ * Contains the `dot` decoration -> a function of `sym`, not a plain const.
+ * Exported so cardimage.ts's SVG card renders this exact string for its
+ * share rail — same single-source-of-truth discipline as absorbedDollars /
+ * planMultiplierLine / limitStretchLine below.
+ */
+export function shareHint(sym: Sym): string {
   // v1.0.1: points at `card` (the canonical screenshot), not --compact.
   return `share: npx cache-refund card  ${sym.dot}  #cacherefund`;
 }

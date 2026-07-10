@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.0.4] — 2026-07-10
+
+- **The generated share image is now a faithful replica of the terminal
+  card** — real screenshots won; the designed hero (giant figure, bars, CTA
+  pill) is gone. Image rows are derived from the terminal renderer and
+  test-enforced identical.
+
 ## [1.0.3] — 2026-07-10
 
 - **Usage-limit framing for subscribers** (multiples, never absolutes): the

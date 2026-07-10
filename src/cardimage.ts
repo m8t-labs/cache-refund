@@ -1,6 +1,7 @@
 /**
- * Generated share image (v1.0.2): a zero-dep, 720x720 SQUARE SVG card writer
- * — dark terminal window, traffic lights, magenta branded CTA pill — with
+ * Generated share image (v1.0.4): a zero-dep, 720x720 SQUARE SVG card writer
+ * that replicates the real terminal `card` output — dark terminal window,
+ * traffic lights, the branded score/receipt box, exactly as printed — with
  * the numbers substituted from the live Summary. Written on share-prompt
  * accept so the post has an attachment without a manual screenshot; cli.ts
  * then best-effort copies the resulting PNG straight onto the image
@@ -8,22 +9,22 @@
  *
  * Square canvas is deliberate, not cosmetic: qlmanage's `-t` thumbnail mode
  * renders a square thumbnail regardless of the source's aspect ratio, so a
- * non-square source (the old 720x440 card) came out letterboxed/padded after
- * conversion. At 720x720 the thumbnail IS the artwork — no crop/sips step
- * needed before or after `qlmanage -t -s 1440` (kept as-is below).
+ * non-square source came out letterboxed/padded after conversion. At
+ * 720x720 the thumbnail IS the artwork — no crop/sips step needed before or
+ * after `qlmanage -t -s 1440` (kept as-is below).
  *
- * Ending-aware hero block (the one huge number, replaces v1's smaller
- * score-box figure): C leads with the API-value receipt delta, A with the
- * unclaimed-refund delta, B with the bare efficiency score — see
- * heroBlock() below. Two more dim, optional lines flex the scale further:
- * "absorbed $X of API-value" under the stat row (any branch, positive-only)
- * and "~Nx your monthly plan" under the hero sub-line (subscription + the
- * `--plan <usd>` flag only) — both single-sourced from render.ts so the
- * terminal card and this SVG never drift apart on the same figure.
+ * THE 1:1 GUARANTEE: nothing in the box, the wrapped insight line, the
+ * limit-stretch line, or the share rail is hand-typed here. Every one of
+ * those strings is pulled straight out of the same render.ts functions the
+ * real terminal calls (numberBox, wrappedLines, limitStretchLine,
+ * shareHint) — this file only strips ANSI, un-pads the box's border and
+ * centering, and lays the result out as SVG text. The terminal and the
+ * image can't drift apart, because the image never carries its own copy of
+ * any number-bearing string to drift from. See boxContentRows/factLine below.
  *
  * Share-safe rules (same as the terminal + share templates): NEVER project
- * names, no "-eq" jargon — subscriber figures say "in API-value" and the
- * footer carries the qualifier. Every substituted string is XML-escaped.
+ * names — the wrapped line is derived with showProjects hardcoded false, the
+ * same default `card` itself uses. Every substituted string is XML-escaped.
  *
  * PNG: X attachments need a raster, so on darwin we best-effort convert via
  * `qlmanage -t -s 1440` (ships with macOS) and rename its `<name>.svg.png`
@@ -35,8 +36,8 @@ import { execFileSync } from "node:child_process";
 import { existsSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { absorbedDollars, decideEnding, fmtAbsorbed, limitMultiples, planMultiplierLine, wrappedLines } from "./render.js";
-import { fmtTokensCompact, makeInk, makeSym } from "./format.js";
+import { decideEnding, limitStretchLine, numberBox, shareHint, wrappedLines } from "./render.js";
+import { makeInk, makeSym, stripAnsi } from "./format.js";
 import type { Summary } from "./types.js";
 
 export const CARD_BASENAME = "cache-refund-card";
@@ -51,178 +52,257 @@ export function escapeXml(s: string): string {
     .replace(/'/g, "&apos;");
 }
 
-/** `$` + rounded-to-the-dollar magnitude, comma-grouped, NEVER cents — the hero is a headline, not a ledger line. */
-function fmtHeroDollars(n: number): string {
-  return `$${Math.round(Math.abs(n)).toLocaleString("en-US")}`;
+// ------------------------------------------------------------------ geometry
+//
+// One 720x720 canvas, a terminal window centered vertically inside it. The
+// window's height is never a guess: it's PAD_TOP + every row this specific
+// Summary produces (the box's row count varies 6-8 depending on whether the
+// absorbed/plan-multiplier rows are present, the limit-stretch line is
+// subscription-only, the second footer line is subscriber-only) + PAD_BOTTOM
+// — computed fresh per card in buildCardSvg, then centered. That's what
+// keeps "box rect sized to wrap its rows" and "whole content block
+// vertically centered" true for every ending, not just the fixtures at hand.
+
+const CANVAS = 720;
+const WIN_X = 16;
+const WIN_W = 688;
+const WIN_RIGHT = WIN_X + WIN_W;
+const WIN_CENTER_X = WIN_X + WIN_W / 2; // 360, also the canvas center
+const RADIUS = 16;
+const TITLEBAR_H = 42;
+
+const PAD_X = 24; // inner left/right text inset from the window edges
+const TEXT_LEFT = WIN_X + PAD_X;
+const TEXT_RIGHT = WIN_RIGHT - PAD_X;
+const TEXT_WIDTH = TEXT_RIGHT - TEXT_LEFT;
+
+const ROW_H = 26;
+const FONT = 15;
+const FONT_DIM = 13; // the limit-stretch line + share rail: secondary, still on the row grid
+const FOOTER_FONT = 12;
+const FOOTER_ROW_H = 19;
+const PAD_TOP = 20;
+const PAD_BOTTOM = 20;
+const GAP_AFTER_PROMPT = 14;
+const GAP_AFTER_BOX = 20;
+const GAP_BEFORE_SHARE = 14;
+const GAP_BEFORE_FOOTER = 20;
+
+const BOX_W = 560;
+const BOX_X = WIN_X + (WIN_W - BOX_W) / 2;
+const BOX_PAD_Y = 14;
+const BOX_NOTCH_W = 150;
+const BOX_NOTCH_H = 18;
+
+/**
+ * Conservative average glyph width (px) at this file's row font sizes — the
+ * same 8.6px/char estimate the width-sanity test uses, so the two can never
+ * silently disagree. Purely a defensive cap: the box's own <=57-col law
+ * (format.ts) already keeps its rows short, and the free-text rows below it
+ * are bounded by the terminal's own 80-col wrap — neither comes close to
+ * these caps for any real corpus, they only guard the pathological case.
+ */
+const CHAR_W_EST = 8.6;
+const ROW_MAX_CHARS = Math.floor(TEXT_WIDTH / CHAR_W_EST);
+const BOX_ROW_MAX_CHARS = Math.floor((BOX_W - 40) / CHAR_W_EST);
+
+/** Truncate to `maxChars`, appending a single ellipsis when cut. */
+function truncateRow(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, Math.max(1, maxChars - 1)).trimEnd()}…`;
 }
 
-/** Truncate to `max` chars (default 64, the hero fact line's budget), appending a single ellipsis when cut. */
-function truncateFact(s: string, max = 64): string {
-  if (s.length <= max) return s;
-  return `${s.slice(0, max - 1).trimEnd()}…`;
+// -------------------------------------------------------- terminal-exact derivation
+
+/**
+ * The box's content rows, verbatim from the terminal — see the file doc
+ * comment's 1:1 guarantee. numberBox() draws the exact <=57-col branded box
+ * `card` prints; rendering it with color on (then stripped right back off,
+ * purely to reuse its centering math) and Unicode symbols, splitting on
+ * newlines, and trimming each row's border glyph + padding recovers exactly
+ * what the terminal shows — never hand-typed, so this and the terminal
+ * cannot drift apart. Blank spacer rows survive as "" (rendered as vertical
+ * gaps below, not text nodes — see buildCardSvg's box-row loop).
+ */
+function boxContentRows(s: Summary, planPrice?: number): string[] {
+  const rendered = stripAnsi(numberBox(s, makeInk(true), makeSym(false), planPrice));
+  const lines = rendered.split("\n");
+  // First/last lines are the box's own top/bottom border (the top one
+  // carries the woven brand label, e.g. "╭─── cache-refund ───…───╮"); the
+  // SVG draws its border and label graphically (see the notch rect in
+  // buildCardSvg) instead of reusing those box-drawing characters.
+  return lines.slice(1, -1).map((line) => line.slice(1, -1).trim());
 }
 
-/** The top wrapped insight, share-safe (no project — showProjects is always false here) and terminal-jargon-free (no "-eq"). */
+/**
+ * The figure row's color. Not recoverable from boxContentRows (the ANSI
+ * codes that carried it were stripped there, deliberately, to reuse the
+ * box's plain-text centering math), so it's recomputed here from the same
+ * Summary fields numberBox itself branches on: green for good news (a saved
+ * receipt, or a certified-optimal score), orange for the actionable gap (an
+ * unclaimed refund, or the rare costlier receipt).
+ */
+function figureColor(s: Summary): "green" | "orange" {
+  const kind = decideEnding(s);
+  if (kind === "C") return s.counterfactual.delta1hMinus5m < 0 ? "green" : "orange";
+  return kind === "B" ? "green" : "orange";
+}
+
+/**
+ * The top wrapped insight line, terminal-exact — including its "-eq" suffix
+ * when the terminal shows one (v1.0.4: this image IS the terminal now, and
+ * the footer still carries the API-value qualifier). Only the leading "» "
+ * bullet is stripped; the SVG draws its own "›" glyph in front instead of
+ * reusing the terminal's "»" (assets/card.svg's established convention).
+ * Project-free by construction: showProjects is hardcoded false, the same
+ * default `card` itself renders with.
+ */
 function factLine(s: Summary): string {
   const lines = wrappedLines(s, makeInk(false), makeSym(false), false);
-  const first = lines[1] ?? "";
-  const clean = first
-    .replace(/^\s*»\s*/, "")
-    .replace(/-eq\b/g, "")
-    .trim();
-  return truncateFact(clean);
-}
-
-/** Plain-English window phrase for the hero sub-line, e.g. "last 90 days" / "the 42-day span analyzed". */
-function windowPhraseLong(s: Summary): string {
-  return s.window.mode === "days" && s.window.days != null
-    ? `last ${s.window.days} days`
-    : `the ${Math.round(s.counterfactual.spanDays)}-day span analyzed`;
-}
-
-interface HeroBlock {
-  overline: string;
-  hero: string;
-  heroClass: "green" | "orange";
-  sub: string;
+  return (lines[1] ?? "").replace(/^\s*»\s*/, "").trim();
 }
 
 /**
- * The ending-aware hero: overline + huge headline number + one-line sub,
- * mirroring the terminal's three verdict shapes (decideEnding's A/B/C, with
- * A-enable and A-revert sharing the same "unclaimed refund" framing — both
- * are "one config line recovers it", just in opposite directions).
+ * Split a fact line around its (at most one) embedded dollar figure, e.g.
+ * "...cache ($453.97-eq)." -> pre="...cache ", figure="($453.97-eq)",
+ * post=".". Mirrors assets/card.svg's own hand-built convention (orange
+ * glyph, orange $ figure, everything else plain) — not every candidate line
+ * carries a dollar figure (the streak/peak-hour/biggest-session lines
+ * don't), so `figure` is null for those and the whole line renders plain.
+ * Greedily includes an immediately-adjacent enclosing "(" / ")" so a
+ * parenthesized figure highlights as one unit, same as the hand-built asset.
  */
-function heroBlock(s: Summary): HeroBlock {
-  const kind = decideEnding(s);
-  if (kind === "C") {
-    const delta = s.counterfactual.delta1hMinus5m;
-    const saved = delta < 0;
-    return {
-      overline: "YOUR 1H CACHE RECEIPT",
-      hero: fmtHeroDollars(delta),
-      heroClass: saved ? "green" : "orange",
-      // Honest flip for the (unusual) subscriber whose 1h TTL cost more than
-      // 5m would have this window — never claim "saved" on a positive delta
-      // (same discipline as render.ts's receiptHeadline/cachingSavedLine).
-      sub: saved
-        ? `saved in API-value · ${windowPhraseLong(s)}`
-        : `costlier than the default · ${windowPhraseLong(s)}`,
-    };
-  }
-  if (kind === "B") {
-    return {
-      overline: "CERTIFIED OPTIMAL",
-      hero: s.efficiencyScore.toFixed(1),
-      heroClass: "green",
-      sub: "the default cache setting is right for how you work",
-    };
-  }
-  // A-enable / A-revert: the recommender's and validator's actionable gap —
-  // same copy either way, since both reduce to "switch the TTL, recover this".
-  return {
-    overline: "UNCLAIMED CACHE REFUND",
-    hero: fmtHeroDollars(s.counterfactual.delta1hMinus5m),
-    heroClass: "orange",
-    sub: "left on the table · one config line recovers it",
-  };
+function splitDollarFigure(text: string): { pre: string; figure: string | null; post: string } {
+  const m = text.match(/\(?\$[\d,]+(?:\.\d+)?(?:-eq)?\)?/);
+  if (!m || m.index === undefined) return { pre: text, figure: null, post: "" };
+  return { pre: text.slice(0, m.index), figure: m[0], post: text.slice(m.index + m[0].length) };
 }
 
-/** Gap-bucket bar width in px (track is 300px wide): pct/100*300, floored at 6px so a nonzero share is never invisible. */
-function barWidth(pctRaw: number): number {
-  if (pctRaw <= 0) return 0;
-  return Math.max(6, Math.round((pctRaw / 100) * 300));
-}
+// ------------------------------------------------------------------- build
 
 /**
- * Build the 720x720 SVG card. Ending-aware like the terminal box — see
- * heroBlock(). Every substituted string is XML-escaped (composed lines are
- * escaped whole, matching the existing convention: build the text, then
- * escape it once, rather than escaping numeric pieces separately).
+ * Build the 720x720 SVG card: a dark terminal window replicating `card`'s
+ * real output — the branded score/receipt box, the top wrapped insight
+ * line, the optional limit-stretch line, and the share rail, at a
+ * consistent line height — plus a short local-only footer. See the file doc
+ * comment for the 1:1 guarantee that keeps every substituted string
+ * identical to what the terminal prints for the same Summary.
  *
- * `planPrice` (`--plan <usd>`, display-only, CLI-supplied) renders the
- * "~Nx your monthly plan" line right under the hero sub-line when the
- * branch is subscription — see render.ts's planMultiplierLine, the single
- * source of truth this and the terminal box both format from.
+ * `planPrice` (`--plan <usd>`, display-only, CLI-supplied) reaches the box's
+ * "~Nx your monthly plan" row for free: it's threaded straight into
+ * numberBox, the same function the terminal box uses, so there is no
+ * separate plan-line code path here to keep in sync.
  */
 export function buildCardSvg(s: Summary, planPrice?: number): string {
-  const hero = heroBlock(s);
-  const statLine = escapeXml(
-    `efficiency ${s.efficiencyScore.toFixed(1)} / 100   ·   ` +
-      `${fmtTokensCompact(s.tokens.creationTotal + s.tokens.readTotal)} tokens   ·   ` +
-      `${s.scope.sessions.toLocaleString()} sessions`,
-  );
-  const fact = escapeXml(factLine(s));
   const subscriber = s.currency !== "USD";
 
-  const bucketTotal = s.buckets.creationTotal > 0 ? s.buckets.creationTotal : 1;
-  const pctWarm = (s.buckets.warm / bucketTotal) * 100;
-  const pctRec = (s.buckets.recoverable / bucketTotal) * 100;
-  const pctCold = (s.buckets.cold / bucketTotal) * 100;
-  const pctWarmText = escapeXml(`${pctWarm.toFixed(1)}%`);
-  const pctRecText = escapeXml(`${pctRec.toFixed(1)}%`);
-  const pctColdText = escapeXml(`${pctCold.toFixed(1)}%`);
+  // ---- terminal-exact derivation (the 1:1 guarantee) ----
+  const bodyRows = boxContentRows(s, planPrice);
+  const figColor = figureColor(s);
+  const fact = truncateRow(factLine(s), ROW_MAX_CHARS - 2); // reserve 2 cols for "› "
+  const stretchRaw = limitStretchLine(s);
+  const stretch = stretchRaw !== null ? truncateRow(stretchRaw, ROW_MAX_CHARS) : null;
+  const rail = shareHint(makeSym(false));
 
-  // "~Nx your monthly plan" — under the hero sub-line, in the gap already
-  // there between it (y=240) and the stat row (y=292); omitted (no line,
-  // no gap left behind) when --plan wasn't passed or the branch isn't
-  // subscription (planMultiplierLine's own gate).
-  const plan = planMultiplierLine(s, planPrice);
-  const planSvgLine =
-    plan !== null
-      ? `\n  <text x="360" y="266" text-anchor="middle" class="t dim" font-size="14">${escapeXml(plan)}</text>`
+  const boxH = bodyRows.length * ROW_H + BOX_PAD_Y * 2;
+
+  // ---- vertical stack, relative to the content area (just below the title bar) ----
+  let cursor = PAD_TOP;
+  const promptYRel = cursor;
+  cursor += ROW_H + GAP_AFTER_PROMPT;
+  const boxTopRel = cursor;
+  cursor += boxH + GAP_AFTER_BOX;
+  const factYRel = cursor;
+  cursor += ROW_H;
+  let stretchYRel: number | null = null;
+  if (stretch !== null) {
+    stretchYRel = cursor;
+    cursor += ROW_H;
+  }
+  cursor += GAP_BEFORE_SHARE;
+  const shareYRel = cursor;
+  cursor += ROW_H + GAP_BEFORE_FOOTER;
+  const footer1YRel = cursor;
+  cursor += FOOTER_ROW_H;
+  let footer2YRel: number | null = null;
+  if (subscriber) {
+    footer2YRel = cursor;
+    cursor += FOOTER_ROW_H;
+  }
+  cursor += PAD_BOTTOM;
+
+  const winH = TITLEBAR_H + cursor;
+  const winY = Math.max(16, Math.round((CANVAS - winH) / 2));
+  const contentTop = winY + TITLEBAR_H;
+
+  const boxY = contentTop + boxTopRel;
+  const boxCx = BOX_X + BOX_W / 2;
+  const notchX = BOX_X + (BOX_W - BOX_NOTCH_W) / 2;
+
+  // ---- box interior rows: 1st non-blank = title, 2nd = figure (bold+color), rest = dim ----
+  let nonBlank = 0;
+  const boxRowsSvg = bodyRows
+    .map((row, i) => {
+      if (row === "") return ""; // blank spacer row: height already reserved, no text node
+      nonBlank++;
+      const rowY = boxY + BOX_PAD_Y + i * ROW_H + ROW_H / 2 + 5;
+      const text = escapeXml(truncateRow(row, BOX_ROW_MAX_CHARS));
+      const cls = nonBlank === 1 ? "txt" : nonBlank === 2 ? figColor : "dim";
+      const weight = nonBlank === 2 ? ' font-weight="700"' : "";
+      return `<text x="${boxCx}" y="${rowY}" text-anchor="middle" class="t ${cls}" font-size="${FONT}"${weight}>${text}</text>`;
+    })
+    .filter((l) => l.length > 0)
+    .join("\n  ");
+
+  const promptSvg = `<text x="${TEXT_LEFT}" y="${contentTop + promptYRel + ROW_H / 2 + 5}" class="t dim" font-size="${FONT}">${escapeXml("$ ")}<tspan class="t txt">${escapeXml("npx cache-refund card")}</tspan></text>`;
+
+  const { pre: factPre, figure: factFigure, post: factPost } = splitDollarFigure(fact);
+  const factFigureSvg =
+    factFigure !== null
+      ? `<tspan class="orange" font-size="${FONT}">${escapeXml(factFigure)}</tspan><tspan class="txt" font-size="${FONT}">${escapeXml(factPost)}</tspan>`
+      : "";
+  const factSvg = `<text x="${TEXT_LEFT}" y="${contentTop + factYRel + ROW_H / 2 + 5}" class="t"><tspan class="orange" font-size="${FONT}">${escapeXml("›")}</tspan><tspan class="txt" font-size="${FONT}">${escapeXml(` ${factPre}`)}</tspan>${factFigureSvg}</text>`;
+
+  const stretchSvg =
+    stretchYRel !== null
+      ? `<text x="${TEXT_LEFT}" y="${contentTop + stretchYRel + ROW_H / 2 + 5}" class="t dim" font-size="${FONT_DIM}">${escapeXml(stretch!)}</text>`
       : "";
 
-  // "absorbed $X of API-value" — under the stat row; omitted (no line, no
-  // gap left behind) when there's nothing positive to have absorbed
-  // (absorbedDollars' own omit rule — see render.ts).
-  const absorbed = absorbedDollars(s);
-  const absorbedSvgLine =
-    absorbed !== null
-      ? `\n  <text x="360" y="316" text-anchor="middle" class="t dim" font-size="14">${escapeXml(fmtAbsorbed(absorbed))}</text>`
+  const shareSvg = `<text x="${TEXT_LEFT}" y="${contentTop + shareYRel + ROW_H / 2 + 5}" class="t dim" font-size="${FONT_DIM}">${escapeXml(rail)}</text>`;
+
+  const footer1Svg = `<text x="${TEXT_LEFT}" y="${contentTop + footer1YRel + FOOTER_ROW_H / 2 + 4}" class="t dim" font-size="${FOOTER_FONT}">${escapeXml(
+    "100% local · token counts + timestamps · nothing leaves this machine",
+  )}</text>`;
+
+  const footer2Svg =
+    footer2YRel !== null
+      ? `<text x="${TEXT_LEFT}" y="${contentTop + footer2YRel + FOOTER_ROW_H / 2 + 4}" class="t dim" font-size="${FOOTER_FONT}">${escapeXml(
+          "$ figures are API-value (list rates) — subscription usage is metered in it, not billed",
+        )}</text>`
       : "";
 
-  // Limit framing (subscription): between the fact line (y=478) and the CTA
-  // pill (y=530) — the reader's own currency is their usage limit, and this
-  // is the line that answers "how does a $200 plan absorb $67k". Omitted
-  // (limitMultiples' gates) off-branch or when 1h isn't actually ahead.
-  const stretch = limitMultiples(s);
-  const stretchSvgLine =
-    stretch !== null
-      ? `\n  <text x="360" y="506" text-anchor="middle" class="t dim" font-size="13">${escapeXml(`same work on a 5m cache: ~${stretch.pct5m}% more of your usage limit`)}</text>`
-      : "";
+  const titleY = winY + 26;
+  const dotCy = winY + 21;
 
-  const footerSub = subscriber
-    ? `\n  <text x="360" y="690" text-anchor="middle" class="t dim" font-size="12">${escapeXml("$ figures are API-value (list rates) — subscription usage is metered in it, not billed")}</text>`
-    : "";
-
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="720" height="720" viewBox="0 0 720 720">
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${CANVAS}" height="${CANVAS}" viewBox="0 0 ${CANVAS} ${CANVAS}">
   <defs><style>
     .t { font-family: "SF Mono", Menlo, Monaco, "DejaVu Sans Mono", monospace; white-space: pre; }
     .dim { fill: #8b8fa3; } .txt { fill: #e6e6ef; }
-    .green { fill: #3fd68f; } .orange { fill: #e8a15d; } .brand { fill: #d75fd7; }
+    .green { fill: #3fd68f; } .orange { fill: #e8a15d; } .brand { fill: #d75fd7; font-weight: 700; }
   </style></defs>
-  <rect width="720" height="720" fill="#0f1016"/>
-  <rect x="16" y="16" width="688" height="688" rx="16" fill="#15161c" stroke="#2a2c37"/>
-  <path d="M16 32 a16 16 0 0 1 16 -16 h656 a16 16 0 0 1 16 16 v26 h-688 z" fill="#1d1f28"/>
-  <circle cx="44" cy="37" r="6.5" fill="#ff5f57"/><circle cx="66" cy="37" r="6.5" fill="#febc2e"/><circle cx="88" cy="37" r="6.5" fill="#28c840"/>
-  <text x="360" y="42" text-anchor="middle" class="t dim" font-size="13">npx cache-refund</text>
-  <text x="360" y="130" text-anchor="middle" class="t dim" font-size="14" letter-spacing="3">${escapeXml(hero.overline)}</text>
-  <text x="360" y="205" text-anchor="middle" class="t ${hero.heroClass}" font-size="68" font-weight="700">${escapeXml(hero.hero)}</text>
-  <text x="360" y="240" text-anchor="middle" class="t dim" font-size="16">${escapeXml(hero.sub)}</text>${planSvgLine}
-  <text x="360" y="292" text-anchor="middle" class="t txt" font-size="16">${statLine}</text>${absorbedSvgLine}
-  <text x="80" y="359" class="t dim" font-size="12" letter-spacing="2">CACHE WRITES BY RE-WARM GAP</text>
-  <rect x="200" y="376" width="300" height="12" rx="6" fill="#232530"/><rect x="200" y="376" width="${barWidth(pctWarm)}" height="12" rx="6" fill="#3fd68f"/>
-  <text x="80" y="387" class="t dim" font-size="13">warm</text><text x="516" y="387" class="t txt" font-size="13">${pctWarmText}</text>
-  <rect x="200" y="398" width="300" height="12" rx="6" fill="#232530"/><rect x="200" y="398" width="${barWidth(pctRec)}" height="12" rx="6" fill="#e0b856"/>
-  <text x="80" y="409" class="t dim" font-size="13">recoverable</text><text x="516" y="409" class="t txt" font-size="13">${pctRecText}</text>
-  <rect x="200" y="420" width="300" height="12" rx="6" fill="#232530"/><rect x="200" y="420" width="${barWidth(pctCold)}" height="12" rx="6" fill="#949cb8"/>
-  <text x="80" y="431" class="t dim" font-size="13">cold</text><text x="516" y="431" class="t txt" font-size="13">${pctColdText}</text>
-  <text x="80" y="478" class="t" font-size="14"><tspan class="orange">›</tspan><tspan class="txt"> ${fact}</tspan></text>${stretchSvgLine}
-  <rect x="80" y="530" width="560" height="64" rx="12" fill="#d75fd7" fill-opacity="0.10" stroke="#d75fd7" stroke-width="1.5"/>
-  <text x="360" y="570" text-anchor="middle" class="t brand" font-size="22" font-weight="700">npx cache-refund</text>
-  <text x="360" y="640" text-anchor="middle" class="t dim" font-size="13">#cacherefund</text>
-  <text x="360" y="672" text-anchor="middle" class="t dim" font-size="12">100% local · token counts + timestamps · nothing leaves this machine</text>${footerSub}
+  <rect width="${CANVAS}" height="${CANVAS}" fill="#0f1016"/>
+  <rect x="${WIN_X}" y="${winY}" width="${WIN_W}" height="${winH}" rx="${RADIUS}" fill="#15161c" stroke="#2a2c37"/>
+  <path d="M${WIN_X} ${winY + RADIUS} a${RADIUS} ${RADIUS} 0 0 1 ${RADIUS} -${RADIUS} h${WIN_W - 2 * RADIUS} a${RADIUS} ${RADIUS} 0 0 1 ${RADIUS} ${RADIUS} v${TITLEBAR_H - RADIUS} h-${WIN_W} z" fill="#1d1f28"/>
+  <circle cx="${WIN_X + 28}" cy="${dotCy}" r="6.5" fill="#ff5f57"/><circle cx="${WIN_X + 50}" cy="${dotCy}" r="6.5" fill="#febc2e"/><circle cx="${WIN_X + 72}" cy="${dotCy}" r="6.5" fill="#28c840"/>
+  <text x="${WIN_CENTER_X}" y="${titleY}" text-anchor="middle" class="t dim" font-size="13">${escapeXml("npx cache-refund")}</text>
+  ${promptSvg}
+  <rect x="${BOX_X}" y="${boxY}" width="${BOX_W}" height="${boxH}" rx="10" fill="none" stroke="#d75fd7" stroke-width="1.6"/>
+  <rect x="${notchX}" y="${boxY - 9}" width="${BOX_NOTCH_W}" height="${BOX_NOTCH_H}" fill="#15161c"/>
+  <text x="${boxCx}" y="${boxY + 5}" text-anchor="middle" class="t brand" font-size="14">${escapeXml("cache-refund")}</text>
+  ${boxRowsSvg}
+  ${factSvg}${stretchSvg}
+  ${shareSvg}
+  ${footer1Svg}${footer2Svg}
 </svg>
 `;
 }
