@@ -1,5 +1,5 @@
 /**
- * Generated share image (v1.0.4): a zero-dep, 720x720 SQUARE SVG card writer
+ * Generated share image (v1.0.5): a zero-dep, content-sized SVG card writer
  * that replicates the real terminal `card` output — dark terminal window,
  * traffic lights, the branded score/receipt box, exactly as printed — with
  * the numbers substituted from the live Summary. Written on share-prompt
@@ -7,11 +7,15 @@
  * then best-effort copies the resulting PNG straight onto the image
  * clipboard (see share.ts's copyImageToClipboard) so the post is paste-ready.
  *
- * Square canvas is deliberate, not cosmetic: qlmanage's `-t` thumbnail mode
- * renders a square thumbnail regardless of the source's aspect ratio, so a
- * non-square source came out letterboxed/padded after conversion. At
- * 720x720 the thumbnail IS the artwork — no crop/sips step needed before or
- * after `qlmanage -t -s 1440` (kept as-is below).
+ * The canvas is exactly card-sized (v1.0.5): 720 wide, and precisely as
+ * tall as the terminal window plus a 16px margin ring — no dead bands above
+ * or below. The old 720x720 square existed only because qlmanage's `-t`
+ * thumbnail mode emits a SQUARE PNG regardless of the source's aspect
+ * ratio; instead of squaring the artwork to survive that, the darwin leg
+ * now top-crops the square thumbnail back to the card's true height with
+ * the built-in PNG codec (png.ts) — see cropCardPng and its safety guard
+ * below. If the converter's layout ever changes, the guard keeps the
+ * uncropped square (graceful degradation).
  *
  * THE 1:1 GUARANTEE: nothing in the box, the wrapped insight line, the
  * limit-stretch line, or the share rail is hand-typed here. Every one of
@@ -27,17 +31,19 @@
  * same default `card` itself uses. Every substituted string is XML-escaped.
  *
  * PNG: X attachments need a raster, so on darwin we best-effort convert via
- * `qlmanage -t -s 1440` (ships with macOS) and rename its `<name>.svg.png`
- * output; any failure silently falls back to SVG-only. `dir`/`execFileSyncFn`
- * are injectable so tests never touch a real ~/Downloads or spawn anything.
+ * `qlmanage -t -s 1440` (ships with macOS), rename its `<name>.svg.png`
+ * output, then crop the square to content; any failure silently falls back
+ * a level (uncropped square, or SVG-only). `dir`/`execFileSyncFn` are
+ * injectable so tests never touch a real ~/Downloads or spawn anything.
  */
 
 import { execFileSync } from "node:child_process";
-import { existsSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { decideEnding, limitStretchLine, numberBox, shareHint, wrappedLines } from "./render.js";
 import { makeInk, makeSym, stripAnsi } from "./format.js";
+import { cropTop, decodePng, encodePng } from "./png.js";
 import type { Summary } from "./types.js";
 
 export const CARD_BASENAME = "cache-refund-card";
@@ -54,22 +60,32 @@ export function escapeXml(s: string): string {
 
 // ------------------------------------------------------------------ geometry
 //
-// One 720x720 canvas, a terminal window centered vertically inside it. The
-// window's height is never a guess: it's PAD_TOP + every row this specific
-// Summary produces (the box's row count varies 6-8 depending on whether the
-// absorbed/plan-multiplier rows are present, the limit-stretch line is
-// subscription-only, the second footer line is subscriber-only) + PAD_BOTTOM
-// — computed fresh per card in buildCardSvg, then centered. That's what
-// keeps "box rect sized to wrap its rows" and "whole content block
-// vertically centered" true for every ending, not just the fixtures at hand.
+// A 720-wide canvas exactly as tall as its content: the terminal window,
+// top-anchored inside a MARGIN ring. The window's height is never a guess:
+// it's PAD_TOP + every row this specific Summary produces (the box's row
+// count varies 6-8 depending on whether the absorbed/plan-multiplier rows
+// are present, the limit-stretch line is subscription-only, the second
+// footer line is subscriber-only) + PAD_BOTTOM — computed fresh per card in
+// buildCard, and the canvas height follows it. That's what keeps "box rect
+// sized to wrap its rows" and "canvas sized to wrap the card" true for
+// every ending, not just the fixtures at hand.
 
-const CANVAS = 720;
-const WIN_X = 16;
-const WIN_W = 688;
+const CANVAS_W = 720;
+/** Outer margin between the window and the canvas edge, all four sides. */
+const MARGIN = 16;
+const WIN_X = MARGIN;
+const WIN_W = CANVAS_W - 2 * MARGIN; // 688
 const WIN_RIGHT = WIN_X + WIN_W;
 const WIN_CENTER_X = WIN_X + WIN_W / 2; // 360, also the canvas center
 const RADIUS = 16;
 const TITLEBAR_H = 42;
+
+/**
+ * The page background. BG_RGB is the same color as channel values, for the
+ * PNG crop guard's pixel compare (cropCardPng) — keep the two in sync.
+ */
+const BG_FILL = "#0f1016";
+const BG_RGB = { r: 0x0f, g: 0x10, b: 0x16 } as const;
 
 const PAD_X = 24; // inner left/right text inset from the window edges
 const TEXT_LEFT = WIN_X + PAD_X;
@@ -180,12 +196,20 @@ function splitDollarFigure(text: string): { pre: string; figure: string | null; 
 
 // ------------------------------------------------------------------- build
 
+interface BuiltCard {
+  svg: string;
+  /** The svg's total height (its `height` attribute) — the PNG crop target's source of truth. */
+  canvasHeight: number;
+}
+
 /**
- * Build the 720x720 SVG card: a dark terminal window replicating `card`'s
- * real output — the branded score/receipt box, the top wrapped insight
- * line, the optional limit-stretch line, and the share rail, at a
- * consistent line height — plus a short local-only footer. See the file doc
- * comment for the 1:1 guarantee that keeps every substituted string
+ * Build the content-sized SVG card: a dark terminal window replicating
+ * `card`'s real output — the branded score/receipt box, the top wrapped
+ * insight line, the optional limit-stretch line, and the share rail, at a
+ * consistent line height — plus a short local-only footer. The canvas is
+ * 720 wide and exactly windowHeight + 2*MARGIN tall, window top-anchored at
+ * MARGIN (nothing to center in — the canvas hugs the card). See the file
+ * doc comment for the 1:1 guarantee that keeps every substituted string
  * identical to what the terminal prints for the same Summary.
  *
  * `planPrice` (`--plan <usd>`, display-only, CLI-supplied) reaches the box's
@@ -193,7 +217,7 @@ function splitDollarFigure(text: string): { pre: string; figure: string | null; 
  * numberBox, the same function the terminal box uses, so there is no
  * separate plan-line code path here to keep in sync.
  */
-export function buildCardSvg(s: Summary, planPrice?: number): string {
+function buildCard(s: Summary, planPrice?: number): BuiltCard {
   const subscriber = s.currency !== "USD";
 
   // ---- terminal-exact derivation (the 1:1 guarantee) ----
@@ -232,7 +256,8 @@ export function buildCardSvg(s: Summary, planPrice?: number): string {
   cursor += PAD_BOTTOM;
 
   const winH = TITLEBAR_H + cursor;
-  const winY = Math.max(16, Math.round((CANVAS - winH) / 2));
+  const winY = MARGIN; // top-anchored: the canvas is content-sized, there is nothing to center in
+  const canvasH = winH + 2 * MARGIN;
   const contentTop = winY + TITLEBAR_H;
 
   const boxY = contentTop + boxTopRel;
@@ -284,13 +309,13 @@ export function buildCardSvg(s: Summary, planPrice?: number): string {
   const titleY = winY + 26;
   const dotCy = winY + 21;
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${CANVAS}" height="${CANVAS}" viewBox="0 0 ${CANVAS} ${CANVAS}">
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${CANVAS_W}" height="${canvasH}" viewBox="0 0 ${CANVAS_W} ${canvasH}">
   <defs><style>
     .t { font-family: "SF Mono", Menlo, Monaco, "DejaVu Sans Mono", monospace; white-space: pre; }
     .dim { fill: #8b8fa3; } .txt { fill: #e6e6ef; }
     .green { fill: #3fd68f; } .orange { fill: #e8a15d; } .brand { fill: #d75fd7; font-weight: 700; }
   </style></defs>
-  <rect width="${CANVAS}" height="${CANVAS}" fill="#0f1016"/>
+  <rect width="${CANVAS_W}" height="${canvasH}" fill="${BG_FILL}"/>
   <rect x="${WIN_X}" y="${winY}" width="${WIN_W}" height="${winH}" rx="${RADIUS}" fill="#15161c" stroke="#2a2c37"/>
   <path d="M${WIN_X} ${winY + RADIUS} a${RADIUS} ${RADIUS} 0 0 1 ${RADIUS} -${RADIUS} h${WIN_W - 2 * RADIUS} a${RADIUS} ${RADIUS} 0 0 1 ${RADIUS} ${RADIUS} v${TITLEBAR_H - RADIUS} h-${WIN_W} z" fill="#1d1f28"/>
   <circle cx="${WIN_X + 28}" cy="${dotCy}" r="6.5" fill="#ff5f57"/><circle cx="${WIN_X + 50}" cy="${dotCy}" r="6.5" fill="#febc2e"/><circle cx="${WIN_X + 72}" cy="${dotCy}" r="6.5" fill="#28c840"/>
@@ -305,6 +330,85 @@ export function buildCardSvg(s: Summary, planPrice?: number): string {
   ${footer1Svg}${footer2Svg}
 </svg>
 `;
+  return { svg, canvasHeight: canvasH };
+}
+
+/** Public builder: the SVG markup for this Summary (see buildCard). */
+export function buildCardSvg(s: Summary, planPrice?: number): string {
+  return buildCard(s, planPrice).svg;
+}
+
+// ---------------------------------------------------------------- png crop
+
+/** Guard row: this many rendered px below the crop line must still be pure padding. */
+const GUARD_OFFSET_PX = 8;
+/** Per-channel color tolerance for the guard's pad match. */
+const GUARD_TOLERANCE = 2;
+/** How many pixels to sample across the guard row. */
+const GUARD_SAMPLES = 12;
+
+/**
+ * The pad fills the guard accepts as provably-not-content. Verified against
+ * a real thumbnail: current macOS qlmanage top-anchors the content and pads
+ * the remainder of its square canvas with opaque WHITE (not the SVG's own
+ * background). The page background and fully-transparent are kept as
+ * accepted variants for other converter versions. None of the three can be
+ * card content: the card's text inks (#e6e6ef at the lightest) sit well
+ * outside the white tolerance, nothing in the card is the page background
+ * edge-to-edge at full width outside the margins' own rows, and no card
+ * pixel is transparent (the SVG paints a full-bleed background rect).
+ */
+type PadKind = "white" | "page-bg" | "transparent";
+
+function padKind(r: number, g: number, b: number, a: number): PadKind | null {
+  if (a <= GUARD_TOLERANCE) return "transparent";
+  if (a !== 255) return null;
+  if (r >= 255 - GUARD_TOLERANCE && g >= 255 - GUARD_TOLERANCE && b >= 255 - GUARD_TOLERANCE) return "white";
+  if (
+    Math.abs(r - BG_RGB.r) <= GUARD_TOLERANCE &&
+    Math.abs(g - BG_RGB.g) <= GUARD_TOLERANCE &&
+    Math.abs(b - BG_RGB.b) <= GUARD_TOLERANCE
+  ) {
+    return "page-bg";
+  }
+  return null;
+}
+
+/**
+ * Top-crop qlmanage's square thumbnail back to the card's true height.
+ * `qlmanage -t` renders the (non-square) SVG onto a square canvas with the
+ * content anchored at the top and dead padding filling the remainder —
+ * OBSERVED behavior, not documented, so it is never trusted blindly: before
+ * cropping, GUARD_SAMPLES pixels spread across the row GUARD_OFFSET_PX
+ * below the crop line must all be the SAME accepted pad fill (see PadKind)
+ * — proving the region being cut is pure padding, not content. The crop
+ * line scales with the thumbnail:
+ * target = round(svgCanvasHeight * renderedWidth / svgCanvasWidth).
+ *
+ * Returns the re-encoded cropped PNG, or null to keep the original file
+ * untouched: guard failed (a different qlmanage layout/version), nothing
+ * below the line to cut, or the PNG isn't the 8-bit RGBA non-interlaced
+ * shape qlmanage emits (png.ts's decoder throws; caught here). Deliberately
+ * silent — the uncropped square is a graceful floor, not an error.
+ */
+export function cropCardPng(png: Buffer, svgCanvasHeight: number, svgCanvasWidth: number = CANVAS_W): Buffer | null {
+  try {
+    const img = decodePng(png);
+    const target = Math.round((svgCanvasHeight * img.width) / svgCanvasWidth);
+    const guardY = target + GUARD_OFFSET_PX;
+    if (target <= 0 || target >= img.height || guardY >= img.height) return null;
+    let pad: PadKind | null = null;
+    for (let i = 0; i < GUARD_SAMPLES; i++) {
+      const x = Math.round(((i + 0.5) / GUARD_SAMPLES) * (img.width - 1));
+      const off = (guardY * img.width + x) * 4;
+      const kind = padKind(img.pixels[off], img.pixels[off + 1], img.pixels[off + 2], img.pixels[off + 3]);
+      if (kind === null || (pad !== null && kind !== pad)) return null;
+      pad = kind;
+    }
+    return encodePng(cropTop(img, target));
+  } catch {
+    return null;
+  }
 }
 
 export interface CardImageResult {
@@ -331,17 +435,21 @@ export function defaultCardDir(home: string = homedir(), cwd: string = process.c
 
 /**
  * Write the SVG (and, on darwin, best-effort PNG) card for this Summary.
- * Never throws for the PNG leg — SVG-only is the graceful floor. The square
- * 720x720 canvas means qlmanage's `-t` thumbnail needs no post-processing:
- * its square output IS the full card, at any `-s` size — no sips/crop step.
+ * Never throws for the PNG leg — each step degrades gracefully: qlmanage
+ * failing means SVG-only; the thumbnail crop failing its safety guard means
+ * the square, uncropped PNG. The happy path is a PNG exactly as tall as the
+ * card: qlmanage's `-t` emits a square canvas (content top-anchored,
+ * background-filled below), and cropCardPng cuts that square back down to
+ * the SVG's true aspect via the built-in codec (png.ts).
  */
 export function writeCardImage(s: Summary, opts: CardImageOpts = {}): CardImageResult {
   const dir = opts.dir ?? defaultCardDir();
   const platform = opts.platform ?? process.platform;
   const exec = opts.execFileSyncFn ?? ((cmd: string, args: string[]) => execFileSync(cmd, args, { stdio: "ignore" }));
 
+  const built = buildCard(s, opts.planPrice);
   const svgPath = join(dir, `${CARD_BASENAME}.svg`);
-  writeFileSync(svgPath, buildCardSvg(s, opts.planPrice), "utf8");
+  writeFileSync(svgPath, built.svg, "utf8");
 
   let pngPath: string | null = null;
   if (platform === "darwin") {
@@ -352,6 +460,14 @@ export function writeCardImage(s: Summary, opts: CardImageOpts = {}): CardImageR
       if (existsSync(qlOut)) {
         const target = join(dir, `${CARD_BASENAME}.png`);
         renameSync(qlOut, target);
+        try {
+          // Cut the square thumbnail down to the card (see cropCardPng);
+          // any hiccup keeps the square file — never fails the PNG leg.
+          const cropped = cropCardPng(readFileSync(target), built.canvasHeight);
+          if (cropped !== null) writeFileSync(target, cropped);
+        } catch {
+          // keep the uncropped square
+        }
         pngPath = target;
       }
     } catch {

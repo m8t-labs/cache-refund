@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.0.5] — 2026-07-11
+
+- **The share image is now exactly card-sized** — the square-canvas
+  workaround (dark bands above and below the card) is gone; the PNG is
+  cropped to content with a built-in zero-dependency PNG codec, and falls
+  back to the uncropped square only if the converter's layout ever changes.
+
 ## [1.0.4] — 2026-07-10
 
 - **The generated share image is now a faithful replica of the terminal

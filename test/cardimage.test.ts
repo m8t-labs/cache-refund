@@ -1,9 +1,11 @@
 /**
- * Generated share-image tests (v1.0.4: 720x720 square card, a faithful
- * replica of the terminal `card` output). The SVG writer's file IO runs
- * against an injected temp dir — never a real ~/Downloads — and the darwin
- * PNG leg uses an injected qlmanage stub, so nothing here spawns a real
- * process.
+ * Generated share-image tests (v1.0.5: content-sized card, a faithful
+ * replica of the terminal `card` output; the darwin PNG leg top-crops
+ * qlmanage's square thumbnail back to the card via the built-in codec).
+ * The SVG writer's file IO runs against an injected temp dir — never a real
+ * ~/Downloads — and the darwin PNG leg uses an injected qlmanage stub
+ * (writing synthetic PNGs built with src/png.ts), so nothing here spawns a
+ * real process.
  *
  * The centerpiece below is the 1:1 identity suite: it independently
  * re-derives every number-bearing string the same way cardimage.ts does
@@ -18,7 +20,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { buildCardSvg, CARD_BASENAME, defaultCardDir, escapeXml, writeCardImage } from "../src/cardimage.js";
+import { buildCardSvg, CARD_BASENAME, cropCardPng, defaultCardDir, escapeXml, writeCardImage } from "../src/cardimage.js";
+import { encodePng, pngDimensions, type RgbaImage } from "../src/png.js";
 import {
   absorbedDollars,
   fmtAbsorbed,
@@ -76,7 +79,33 @@ function plainText(svgFragment: string): string {
     .replace(/&apos;/g, "'");
 }
 
-describe("buildCardSvg (v1.0.4: terminal-replica card)", () => {
+/** The SVG's own canvas height (its root `height` attribute). */
+function svgHeight(svg: string): number {
+  const m = svg.match(/<svg [^>]*height="(\d+)"/);
+  expect(m).not.toBeNull();
+  return Number(m![1]);
+}
+
+/** Solid-fill RGBA image, with optional per-pixel overrides. */
+function solidImage(
+  width: number,
+  height: number,
+  rgba: [number, number, number, number],
+  override?: (x: number, y: number) => [number, number, number, number] | null,
+): RgbaImage {
+  const pixels = Buffer.allocUnsafe(width * height * 4);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      pixels.set(override?.(x, y) ?? rgba, (y * width + x) * 4);
+    }
+  }
+  return { width, height, pixels };
+}
+
+const PAGE_BG: [number, number, number, number] = [0x0f, 0x10, 0x16, 255];
+const WHITE: [number, number, number, number] = [255, 255, 255, 255];
+
+describe("buildCardSvg (v1.0.5: content-sized terminal-replica card)", () => {
   it("is well-formed XML: single svg root, balanced text/tspan tags, no raw ampersands", () => {
     for (const s of ENDINGS) {
       const svg = buildCardSvg(s);
@@ -90,11 +119,25 @@ describe("buildCardSvg (v1.0.4: terminal-replica card)", () => {
     }
   });
 
-  it("is a deliberate 720x720 square canvas (qlmanage's thumbnail IS the artwork, no crop step)", () => {
+  it("is exactly content-sized: 720 wide, height = window + 16px margins, top-anchored — no dead bands (v1.0.5)", () => {
     for (const s of ENDINGS) {
       const svg = buildCardSvg(s);
-      expect(svg).toContain('width="720" height="720" viewBox="0 0 720 720"');
+      const h = svgHeight(svg);
+      expect(h).toBeLessThan(720); // the whole point: nothing left over to band
+      expect(svg).toContain(`width="720" height="${h}" viewBox="0 0 720 ${h}"`);
+      // background rect covers exactly the canvas; window rect top-anchored at the 16px margin
+      expect(svg).toContain(`<rect width="720" height="${h}" fill="#0f1016"/>`);
+      const win = svg.match(/<rect x="16" y="16" width="688" height="(\d+)" rx="16"/);
+      expect(win).not.toBeNull();
+      // window height + top/bottom margins account for the whole canvas — zero slack
+      expect(Number(win![1]) + 32).toBe(h);
     }
+  });
+
+  it("canvas height tracks content: the receipt card (more rows) is taller than the API score card", () => {
+    const hA = svgHeight(buildCardSvg(fixtureEndingAEnable));
+    const hCplan = svgHeight(buildCardSvg(fixtureEndingCReceipt, 2000));
+    expect(hCplan).toBeGreaterThan(hA);
   });
 
   describe("the 1:1 identity guarantee: every derived row matches the real renderer verbatim", () => {
@@ -328,6 +371,55 @@ describe("buildCardSvg (v1.0.4: terminal-replica card)", () => {
   });
 });
 
+describe("cropCardPng (square-thumbnail top-crop + safety guard — pure codec, no qlmanage)", () => {
+  it("crops a white-padded square (the observed qlmanage layout) down to the svg height", () => {
+    // 100x100 square: top 60 rows are card pixels, rows 60+ are the white pad.
+    const png = encodePng(solidImage(100, 100, WHITE, (_x, y) => (y < 60 ? PAGE_BG : null)));
+    const out = cropCardPng(png, 60, 100);
+    expect(out).not.toBeNull();
+    expect(pngDimensions(out!)).toEqual({ width: 100, height: 60 });
+  });
+
+  it("scales the crop line by the rendered width (2x thumbnail, like qlmanage -s 1440 for a 720-wide svg)", () => {
+    const png = encodePng(solidImage(200, 200, WHITE, (_x, y) => (y < 120 ? PAGE_BG : null)));
+    const out = cropCardPng(png, 60, 100); // rendered at 2x -> target = 120
+    expect(pngDimensions(out!)).toEqual({ width: 200, height: 120 });
+  });
+
+  it("accepts a page-background pad and a fully-transparent pad too (other converter variants)", () => {
+    const allBg = encodePng(solidImage(100, 100, PAGE_BG));
+    expect(pngDimensions(cropCardPng(allBg, 60, 100)!)).toEqual({ width: 100, height: 60 });
+    const transparent = encodePng(solidImage(100, 100, [0, 0, 0, 0], (_x, y) => (y < 60 ? PAGE_BG : null)));
+    expect(pngDimensions(cropCardPng(transparent, 60, 100)!)).toEqual({ width: 100, height: 60 });
+  });
+
+  it("guard: content in the would-be-cut region skips the crop (keep the square)", () => {
+    // card-text-colored pixels across the guard row (target 60 + offset 8) —
+    // e.g. a converter version that centers the content instead
+    const png = encodePng(solidImage(100, 100, WHITE, (_x, y) => (y === 68 ? [0xe6, 0xe6, 0xef, 255] : y < 60 ? PAGE_BG : null)));
+    expect(cropCardPng(png, 60, 100)).toBeNull();
+  });
+
+  it("guard: a mixed pad row (half white, half background) skips the crop — the pad must be ONE fill", () => {
+    const png = encodePng(solidImage(100, 100, WHITE, (x, y) => (y >= 60 && x < 50 ? PAGE_BG : y < 60 ? PAGE_BG : null)));
+    expect(cropCardPng(png, 60, 100)).toBeNull();
+  });
+
+  it("guard: a semi-transparent pad skips the crop (neither opaque pad nor fully transparent)", () => {
+    const png = encodePng(solidImage(100, 100, [255, 255, 255, 128], (_x, y) => (y < 60 ? PAGE_BG : null)));
+    expect(cropCardPng(png, 60, 100)).toBeNull();
+  });
+
+  it("no-op on an already content-sized png (nothing below the crop line)", () => {
+    const png = encodePng(solidImage(100, 60, PAGE_BG));
+    expect(cropCardPng(png, 60, 100)).toBeNull();
+  });
+
+  it("keeps files it can't parse (not a PNG / unsupported shape) untouched", () => {
+    expect(cropCardPng(Buffer.from("png-bytes"), 60, 100)).toBeNull();
+  });
+});
+
 describe("writeCardImage (injected dir + qlmanage stub — no real system access)", () => {
   let dir: string;
   beforeEach(() => {
@@ -353,7 +445,7 @@ describe("writeCardImage (injected dir + qlmanage stub — no real system access
     expect(readFileSync(res.svgPath, "utf8")).toContain("YOUR 1H CACHE RECEIPT");
   });
 
-  it("darwin: renames qlmanage's <name>.svg.png output to <name>.png", () => {
+  it("darwin: renames qlmanage's <name>.svg.png output to <name>.png (unparseable bytes: kept verbatim, no crop)", () => {
     const res = writeCardImage(fixtureEndingCReceipt, {
       dir,
       platform: "darwin",
@@ -368,6 +460,42 @@ describe("writeCardImage (injected dir + qlmanage stub — no real system access
     expect(res.pngPath).toBe(join(dir, `${CARD_BASENAME}.png`));
     expect(existsSync(res.pngPath!)).toBe(true);
     expect(existsSync(join(dir, `${CARD_BASENAME}.svg.png`))).toBe(false); // renamed away
+    expect(readFileSync(res.pngPath!, "utf8")).toBe("png-bytes"); // crop is a guarded no-op on non-PNG bytes
+  });
+
+  it("darwin: top-crops the square thumbnail to the card's height (the v1.0.5 no-bands guarantee)", () => {
+    const expectedH = svgHeight(buildCardSvg(fixtureEndingCReceipt));
+    const res = writeCardImage(fixtureEndingCReceipt, {
+      dir,
+      platform: "darwin",
+      execFileSyncFn: () => {
+        // fake qlmanage: a 720x720 square rendered at 1x — card rows up top,
+        // white pad below, the observed real layout.
+        const square = solidImage(720, 720, WHITE, (_x, y) => (y < expectedH ? PAGE_BG : null));
+        writeFileSync(join(dir, `${CARD_BASENAME}.svg.png`), encodePng(square));
+      },
+    });
+    expect(res.pngPath).not.toBeNull();
+    expect(pngDimensions(readFileSync(res.pngPath!))).toEqual({ width: 720, height: expectedH });
+    expect(expectedH).toBeLessThan(720);
+  });
+
+  it("darwin: an unexpected thumbnail layout keeps the square file (guard refuses the cut)", () => {
+    const expectedH = svgHeight(buildCardSvg(fixtureEndingCReceipt));
+    const res = writeCardImage(fixtureEndingCReceipt, {
+      dir,
+      platform: "darwin",
+      execFileSyncFn: () => {
+        // a content-colored guard row — e.g. a converter that centers
+        // instead of top-anchoring, putting card pixels below the crop line.
+        const square = solidImage(720, 720, WHITE, (_x, y) =>
+          y === expectedH + 8 ? [0xe6, 0xe6, 0xef, 255] : y < expectedH ? PAGE_BG : null,
+        );
+        writeFileSync(join(dir, `${CARD_BASENAME}.svg.png`), encodePng(square));
+      },
+    });
+    expect(res.pngPath).not.toBeNull();
+    expect(pngDimensions(readFileSync(res.pngPath!))).toEqual({ width: 720, height: 720 });
   });
 
   it("darwin: silent SVG-only fallback when qlmanage fails", () => {
