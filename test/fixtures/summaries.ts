@@ -90,13 +90,17 @@ export const fixtureEndingAEnable: Summary = {
     },
   ],
   counterfactual: {
+    // Internally consistent: |delta| must be smaller than cost5m ($246.25),
+    // or the implied cost1h goes negative (the original -380 draft had that
+    // bug — caught when the share templates started expressing the delta as
+    // a share of the bill: 380/246.25 would be a nonsense 154%).
     actualCost: 25_000_000 * 1.25 * 5e-6 + 180_000_000 * 0.1 * 5e-6,
     cost5m: 25_000_000 * 1.25 * 5e-6 + 180_000_000 * 0.1 * 5e-6,
-    cost1h: 25_000_000 * 1.25 * 5e-6 + 180_000_000 * 0.1 * 5e-6 - 380.0, // 1h is cheaper
-    delta1hMinus5m: -380.0,
+    cost1h: 25_000_000 * 1.25 * 5e-6 + 180_000_000 * 0.1 * 5e-6 - 80.0, // 1h is cheaper
+    delta1hMinus5m: -80.0,
     tailWriteTokens: 1_200_000,
     tailWriteCost: 12.0,
-    delta30d: -380.0,
+    delta30d: -80.0,
     spanDays: 30,
   },
   efficiencyScore: 71.2,

@@ -8,13 +8,13 @@ body:
       value: |
         If a **number** looks wrong rather than the tool misbehaving, please use the **Wrong number (priority lane)** template instead — those get triaged first.
 
-        **Privacy note:** don't paste transcript content. cache-cash never reads it and issues shouldn't contain it.
+        **Privacy note:** don't paste transcript content. cache-refund never reads it and issues shouldn't contain it.
   - type: textarea
     id: what-happened
     attributes:
       label: What happened?
       description: What you ran, what you expected, and what you got.
-      placeholder: "Ran `npx cache-cash enable`; expected it to write the flag; got a stack trace ..."
+      placeholder: "Ran `npx cache-refund enable`; expected it to write the flag; got a stack trace ..."
     validations:
       required: true
   - type: textarea
@@ -31,14 +31,14 @@ body:
     id: command
     attributes:
       label: Exact command
-      placeholder: "npx cache-cash --days 30 --project ~/dev/foo"
+      placeholder: "npx cache-refund --days 30 --project ~/dev/foo"
     validations:
       required: true
   - type: input
     id: version
     attributes:
-      label: cache-cash version, Node version, OS
-      placeholder: "cache-cash 1.0.0, node 18.x, macOS 15"
+      label: cache-refund version, Node version, OS
+      placeholder: "cache-refund 1.0.0, node 18.x, macOS 15"
     validations:
       required: true
   - type: textarea

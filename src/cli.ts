@@ -2,18 +2,32 @@
 /**
  * The full CLI surface.
  *
- *   npx cache-cash                 full checkup
- *   npx cache-cash card            score box + top Wrapped line
- *   npx cache-cash enable          confirmed 1h-TTL enable flow
- *   npx cache-cash revert          confirmed 5m-TTL revert flow
- *   npx cache-cash verify          post-enable TTL check
- *   npx cache-cash recheck         baseline comparison
+ *   npx cache-refund                 full checkup
+ *   npx cache-refund card            score box + top Wrapped line
+ *   npx cache-refund enable          confirmed 1h-TTL enable flow
+ *   npx cache-refund revert          confirmed 5m-TTL revert flow
+ *   npx cache-refund verify          post-enable TTL check
+ *   npx cache-refund recheck         baseline comparison
  *
  *   --days N (90) · --project <path> · --price <model=$/MTok,...> · --yes ·
  *   --no-color · --all-time · --json · --md · --compact · --explain ·
- *   --version · --help
+ *   --version · --help ·
+ *   --projects (v1.0.1: opt back into project names in human output;
+ *               default is share-safe — no project names in screenshots)
+ *   --no-share (v1.0.2: silence the share prompt; same as env
+ *               CACHE_REFUND_NO_SHARE=1 — see maybeSharePrompt)
+ *   --plan <usd> (v1.0.2: monthly subscription price; subscription branch
+ *               only — renders "~Nx your monthly plan, absorbed for free"
+ *               on the receipt/card/SVG. Non-positive/non-numeric -> usage
+ *               error, exit 2. See render.ts's planMultiplierLine.)
  *
- * Exit codes: 0 ok · 1 no transcripts found · 2 parse/internal error.
+ * Also: --branch-override <api-5m|api-1h|subscription> — a HIDDEN dev-only
+ * flag (not in this list on purpose: not for README, not for users). Forces
+ * the billing branch on your REAL corpus numbers, for previewing the other
+ * endings without needing three different machines. See CONTRIBUTING.md's
+ * "Previewing the other endings" and verdict.ts's BuildSummaryInput.branchOverride.
+ *
+ * Exit codes: 0 ok · 1 no transcripts found · 2 parse/usage/internal error.
  * `--json` never prompts.
  *
  * TTY-ness is decided ONCE, here, up front, and threaded through every
@@ -21,17 +35,31 @@
  * process.stdout.isTTY themselves.
  */
 
+import { realpathSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
+import { pathToFileURL } from "node:url";
 import { run } from "./pipeline.js";
 import { parsePriceOverride } from "./pricing.js";
 import { applyEnable, applyRevert, runRecheck, runVerify } from "./actions.js";
 import {
+  bskyIntentUrl,
+  copyImageToClipboard,
+  copyToClipboard,
+  noShareEnvSet,
+  openExternal,
+  revealFile,
+  runShareAccept,
+  SHARE_PROMPT_LINE,
+  xIntentUrl,
+} from "./share.js";
+import { writeCardImage } from "./cardimage.js";
+import {
   checkupLines,
   decideEnding,
   gapBars,
-  numberBox,
+  makeScanProgress,
   pickLoadingPun,
   renderAmbiguousNotice,
   renderCard,
@@ -40,8 +68,8 @@ import {
   renderExplain,
   renderFull,
   renderMarkdown,
-  scanCounterLine,
   shareRail,
+  shareTemplate,
   trustLine,
   wrappedLines,
 } from "./render.js";
@@ -50,7 +78,7 @@ import type { Branch, Summary } from "./types.js";
 
 // ------------------------------------------------------------------ argv
 
-type Subcommand = "checkup" | "card" | "enable" | "revert" | "verify" | "recheck";
+type Subcommand = "checkup" | "card" | "enable" | "revert" | "verify" | "recheck" | "share";
 
 interface Args {
   subcommand: Subcommand;
@@ -64,30 +92,81 @@ interface Args {
   md: boolean;
   compact: boolean;
   explain: boolean;
+  /**
+   * --projects (v1.0.1): opt back into printing project names in human
+   * output for local diagnosis. Default OFF — share-safe output never leaks
+   * project names into screenshots. Distinct from --project <path> (scope
+   * filter). --json always keeps its project fields regardless.
+   */
+  projects: boolean;
+  /**
+   * --no-share (v1.0.2): silence maybeSharePrompt entirely (no prompt line,
+   * no "share anytime" hint) — same effect as env CACHE_REFUND_NO_SHARE
+   * (see share.ts's noShareEnvSet). The share prompt itself has no other
+   * frequency guard: it appears on every interactive checkup end, so this
+   * flag is the standing opt-out.
+   */
+  noShare: boolean;
+  /**
+   * --plan <usd> (v1.0.2): monthly subscription price, USD. Display-only —
+   * never affects any computed figure, only whether the "~Nx your monthly
+   * plan, absorbed for free" line renders (subscription branch only; see
+   * render.ts's planMultiplierLine). Validated at parse time: non-positive
+   * or non-numeric is a usage error (UsageError below), not a silent ignore
+   * — unlike most flags here, a wrong --plan value would silently mislabel
+   * a real dollar comparison, so it fails loud instead.
+   */
+  plan?: number;
+  /**
+   * --branch-override <api-5m|api-1h|subscription> (v1.0.2): HIDDEN dev-only
+   * flag, not documented in README (see this file's top comment and
+   * CONTRIBUTING.md's "Previewing the other endings"). Forces buildSummary's
+   * existing branchOverride seam — see verdict.ts — from the CLI instead of
+   * from the interactive ambiguous-branch question, so a maintainer can
+   * preview any of the three endings against their OWN real corpus for
+   * screenshots/QA. Validated at parse time like --plan.
+   */
+  branchOverride?: Branch;
 }
 
-const SUBCOMMANDS = new Set<Subcommand>(["card", "enable", "revert", "verify", "recheck"]);
+const SUBCOMMANDS = new Set<Subcommand>(["card", "enable", "revert", "verify", "recheck", "share"]);
+const BRANCH_OVERRIDE_VALUES: ReadonlySet<Branch> = new Set(["api-5m", "api-1h", "subscription"]);
 
-const HELP_TEXT = `cache-cash - a cache doctor for Claude Code
+/**
+ * A clean, stack-trace-free CLI usage error: caught in main(), printed as
+ * `cache-refund: <message>` on stderr, exit 2 — never the generic top-level
+ * catch-all (which prints err.stack, appropriate for a genuine bug, not a
+ * typo'd flag value).
+ */
+class UsageError extends Error {}
+
+function describeArg(raw: string | undefined): string {
+  return raw === undefined ? "nothing" : JSON.stringify(raw);
+}
+
+const HELP_TEXT = `cache-refund - a cache doctor for Claude Code
 
 Usage
-  npx cache-cash                 full checkup
-  npx cache-cash card            score box + top Wrapped line
-  npx cache-cash enable          confirmed 1h-TTL enable flow
-  npx cache-cash revert          confirmed 5m-TTL revert flow
-  npx cache-cash verify          post-enable TTL check
-  npx cache-cash recheck         baseline comparison
+  npx cache-refund                 full checkup
+  npx cache-refund card            score box + top Wrapped line
+  npx cache-refund enable          confirmed 1h-TTL enable flow
+  npx cache-refund revert          confirmed 5m-TTL revert flow
+  npx cache-refund verify          post-enable TTL check
+  npx cache-refund recheck         baseline comparison
 
 Flags
   --days <n>                 analysis window in days (default 90)
   --all-time                 the whole corpus, ignoring --days
   --project <path>           one project directory only
   --price <model=$/MTok,...> per-model price overrides
+  --plan <usd>               your monthly subscription price, in USD
   --yes, -y                  skip the confirmation prompt
   --json                     machine-readable summary; never prompts
   --md                       markdown report
   --compact                  the short version
   --explain                  the formulas, with your numbers filled in
+  --projects                 show project names (hidden by default)
+  --no-share                 silence the share prompt
   --no-color                 strip ANSI color
   --version                  print the version and exit
   --help                     this
@@ -106,6 +185,8 @@ function parseArgs(argv: string[]): Args {
     md: false,
     compact: false,
     explain: false,
+    projects: false,
+    noShare: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -136,17 +217,45 @@ function parseArgs(argv: string[]): Args {
       case "--no-color":
         args.noColor = true;
         break;
+      case "--no-share":
+        args.noShare = true;
+        break;
       case "--days": {
         const v = Number(argv[++i]);
         args.days = Number.isFinite(v) ? v : args.days;
         break;
       }
+      case "--projects":
+        // NOTE: distinct from --project <path> below (exact-match switch, no
+        // prefix ambiguity): --projects re-enables project names in human
+        // output; --project scopes the analysis to one project dir.
+        args.projects = true;
+        break;
       case "--project":
         args.project = argv[++i];
         break;
       case "--price":
         args.overrides = parsePriceOverride(argv[++i] ?? "");
         break;
+      case "--plan": {
+        const raw = argv[++i];
+        const v = Number(raw);
+        if (raw === undefined || !Number.isFinite(v) || v <= 0) {
+          throw new UsageError(`--plan requires a positive USD amount, e.g. --plan 200 (got ${describeArg(raw)})`);
+        }
+        args.plan = v;
+        break;
+      }
+      case "--branch-override": {
+        const raw = argv[++i];
+        if (raw === undefined || !BRANCH_OVERRIDE_VALUES.has(raw as Branch)) {
+          throw new UsageError(
+            `--branch-override must be one of api-5m, api-1h, subscription (got ${describeArg(raw)})`,
+          );
+        }
+        args.branchOverride = raw as Branch;
+        break;
+      }
       default:
         // Unknown flags are ignored rather than fatal — a screenshot tool
         // shouldn't crash on a typo'd flag; --json output is still valid.
@@ -189,12 +298,86 @@ function promptYesNo(question: string): Promise<boolean> {
   });
 }
 
+/** One free-form prompt line on stdin (share CTA). */
+function promptLine(question: string): Promise<string> {
+  return new Promise((resolve) => {
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve(answer.trim().toLowerCase());
+    });
+  });
+}
+
+// ------------------------------------------------------------- share CTA
+
+/**
+ * The share CTA (v1.0.1; default-on, no frequency guard, as of v1.0.2).
+ * TTY-interactive only — never non-TTY/CI/--json/--md/card/--compact
+ * (callers gate on the checkup TTY path + the two forced re-ask moments).
+ *
+ * No once-per-machine gate anymore: this fires on EVERY interactive checkup
+ * end, plus right after a successful enable, after a recheck showing
+ * positive savings, and on the `share` subcommand — all callers just call
+ * this directly now. The only way to silence it is the standing opt-out:
+ * `--no-share` (the `noShare` param) or env `CACHE_REFUND_NO_SHARE`
+ * (share.ts's noShareEnvSet) — checked FIRST, before the interactive check,
+ * so a suppressed run prints nothing at all, not even the dim hint line.
+ * Any non-[x/b/c] answer (including a bare Enter) = skip, no nag — but the
+ * door stays visible via the dim "share anytime" line.
+ *
+ * Trust line holds: zero network requests from this process — [x]/[b] open
+ * the user's own browser with prefilled text they read before posting; [c]
+ * uses the local clipboard tool.
+ */
+type ShareContext = "checkup" | "post-enable" | "recheck";
+
+async function maybeSharePrompt(summary: Summary, noShare: boolean, planPrice?: number, context: ShareContext = "checkup"): Promise<void> {
+  if (noShare || noShareEnvSet()) return;
+  const interactive = process.stdout.isTTY && !process.env.CI;
+  if (!interactive) return;
+
+  const answer = await promptLine(`\n${SHARE_PROMPT_LINE}`);
+
+  if (answer === "x" || answer === "b") {
+    const text = shareTemplate(summary, context);
+    const url = answer === "x" ? xIntentUrl(text) : bskyIntentUrl(text);
+    // Generated share image (v1.0.2, replaces the screenshot ask): write the
+    // SVG card (+ best-effort PNG on darwin — X attachments need a raster),
+    // best-effort put the IMAGE ITSELF on the clipboard so the post is
+    // paste-ready (Cmd+V), and print the tip — ALL BEFORE opening the
+    // browser (see share.ts's runShareAccept: opening the browser first used
+    // to steal terminal focus before the clipboard tip ever printed).
+    await runShareAccept(url, {
+      writeCardImage: () => writeCardImage(summary, { planPrice }),
+      copyImageToClipboard,
+      revealFile,
+      openExternal,
+      write: (s) => process.stdout.write(s),
+      pauseBeforeOpen: () => new Promise((r) => setTimeout(r, 1100)),
+    });
+    return;
+  }
+  if (answer === "c") {
+    const md = renderMarkdown(summary);
+    const copied = await copyToClipboard(md);
+    if (copied) {
+      process.stdout.write("copied — paste it into Slack/Teams.\n");
+    } else {
+      process.stdout.write(md + "\n\n(no clipboard tool found — copy the block above)\n");
+    }
+    return;
+  }
+  // Skipped (Enter, or anything else): stay quiet, but leave the door visible.
+  process.stdout.write(makeInk(true).dim("share anytime: npx cache-refund share\n"));
+}
+
 /** The one interactive branch-ambiguity question: "subscription or API/Bedrock/Vertex?". */
 function promptBranch(): Promise<Branch> {
   return new Promise((resolve) => {
     const rl = createInterface({ input: process.stdin, output: process.stdout });
     rl.question(
-      "cache-cash: couldn't tell how you pay from transcripts or settings.\n" +
+      "cache-refund: couldn't tell how you pay from transcripts or settings.\n" +
         "How do you pay for Claude Code — (s)ubscription or (a)PI/Bedrock/Vertex? [s/a] ",
       (answer) => {
         rl.close();
@@ -211,10 +394,11 @@ async function main(): Promise<number> {
   const rawArgv = process.argv.slice(2);
 
   // --version / --help short-circuit everything else, at any argv position
-  // (e.g. `cache-cash card --help`) — they must answer with no transcripts,
-  // no HOME, and no TTY required, since that's what a fresh `npx cache-cash
-  // --version` on a random machine looks like. --version wins when both are
-  // present.
+  // (e.g. `cache-refund card --help`) — they must answer with no transcripts,
+  // no HOME, and no TTY required, since that's what a fresh `npx cache-refund
+  // --version` on a random machine looks like. Ahead of parseArgs too, so a
+  // bad companion flag can't turn `--help` into a usage error. --version wins
+  // when both are present.
   if (rawArgv.includes("--version")) {
     const pkg = createRequire(import.meta.url)("../package.json") as { version: string };
     process.stdout.write(pkg.version + "\n");
@@ -225,7 +409,16 @@ async function main(): Promise<number> {
     return 0;
   }
 
-  const args = parseArgs(rawArgv);
+  let args: Args;
+  try {
+    args = parseArgs(rawArgv);
+  } catch (err) {
+    if (err instanceof UsageError) {
+      process.stderr.write(`cache-refund: ${err.message}\n`);
+      return 2;
+    }
+    throw err;
+  }
   const tty = isInteractiveTty(args);
   const color = useColor(args, tty);
   const ink = makeInk(color);
@@ -236,7 +429,7 @@ async function main(): Promise<number> {
 
   // enable/revert are first-class subcommands and must work in a HOME with
   // zero transcripts — the settings edit needs no Summary. Route them BEFORE
-  // the analysis pipeline. --json is exempt: `cache-cash enable --json` is a
+  // the analysis pipeline. --json is exempt: `cache-refund enable --json` is a
   // Summary dump and never writes, so it keeps the pipeline path below.
   // verify/recheck DO need transcripts (they analyze them) and keep their
   // pipeline dependency unchanged.
@@ -244,16 +437,19 @@ async function main(): Promise<number> {
     return await runStandaloneAction(args);
   }
 
-  // Live per-project scan counter (trust line, TTY only) needs the run to
-  // report progress; run() itself is a single async call (no progress
-  // callback in the Summary schema), so on huge corpora (measured ~4s over
-  // 21.7k files) we print the trust line + a one-shot loading pun
-  // immediately, then the real result once run() resolves. This satisfies
-  // "the wait is part of the demo" without needing a progress callback into
-  // pipeline.ts's run().
+  // Live in-place scan counter (TTY checkup only), fed by pipeline.ts's
+  // additive onFileParsed hook (v1.0.1 — replaces the old one-shot
+  // "scanning 0/1" line that stayed stuck above the CHECKUP section).
+  // The counter rewrites ONLY its own line via "\r" frames and is finalized
+  // (erased) the moment run() resolves — the CHECKUP section carries the
+  // final counts, and nothing above the progress line is ever touched
+  // (no-screen-clear law).
+  let progress: ReturnType<typeof makeScanProgress> | null = null;
   if (tty && args.subcommand === "checkup") {
     process.stdout.write(trustLine(ink, sym) + "\n");
-    process.stdout.write(scanCounterLine(0, 1, pickLoadingPun(), ink, sym) + "\n");
+    progress = makeScanProgress(pickLoadingPun(), ink, sym);
+    const first = progress.frame(0, 0);
+    if (first !== null) process.stdout.write(first);
   }
 
   // Always resolve with jsonMode:true internally first so we get the HONEST
@@ -265,7 +461,22 @@ async function main(): Promise<number> {
     allTime: args.allTime,
     jsonMode: true,
     overrides: args.overrides,
+    // Hidden dev flag (see Args.branchOverride): forces the branch on the
+    // REAL corpus below, before the ambiguous-branch check even runs — the
+    // interactive question never fires when this is set (branch is never
+    // "ambiguous" once overridden).
+    branchOverride: args.branchOverride,
+    branchOverrideSource: args.branchOverride ? "flag" : undefined,
+    onFileParsed: progress
+      ? (done, total) => {
+          const p = progress!.frame(done, total);
+          if (p !== null) process.stdout.write(p);
+        }
+      : undefined,
   });
+  // Finalize the progress line BEFORE anything else prints (errors, the
+  // ambiguous-branch question, the checkup itself).
+  if (progress) process.stdout.write(progress.finish());
 
   if (baseResult.code === 1) {
     process.stderr.write("No transcripts found under ~/.claude/projects\n");
@@ -315,7 +526,7 @@ async function dispatch(
   summary: Summary,
   renderOpts: { tty: boolean; color: boolean },
 ): Promise<number> {
-  const opts = { tty: renderOpts.tty, noColor: !renderOpts.color };
+  const opts = { tty: renderOpts.tty, noColor: !renderOpts.color, showProjects: args.projects, planPrice: args.plan };
 
   // --json always wins (stable machine-readable schema).
   if (args.json) {
@@ -326,6 +537,14 @@ async function dispatch(
   switch (args.subcommand) {
     case "card":
       process.stdout.write(renderCard(summary, opts) + "\n");
+      return 0;
+
+    case "share":
+      // Sharing on demand: same card + prompt as the checkup's closing frame
+      // (there's no frequency guard to bypass anymore — see maybeSharePrompt
+      // — running `share` just asks, same as any other checkup end).
+      process.stdout.write(renderCard(summary, opts) + "\n");
+      await maybeSharePrompt(summary, args.noShare, args.plan);
       return 0;
 
     // "enable" / "revert" never reach this switch: non-json runs are
@@ -343,6 +562,10 @@ async function dispatch(
     case "recheck": {
       const res = await runRecheck({ home: homedir() });
       process.stdout.write(res.message.join("\n") + "\n");
+      if ((res.savedSinceEnable ?? 0) > 0) {
+        // High-emotion re-ask moment #2: a receipt showing positive savings.
+        await maybeSharePrompt(summary, args.noShare, args.plan, "recheck");
+      }
       return 0;
     }
 
@@ -356,7 +579,7 @@ async function dispatch(
 async function renderCheckup(
   args: Args,
   summary: Summary,
-  opts: { tty: boolean; noColor: boolean },
+  opts: { tty: boolean; noColor: boolean; planPrice?: number },
 ): Promise<number> {
   if (args.md) {
     process.stdout.write(renderMarkdown(summary) + "\n");
@@ -380,21 +603,51 @@ async function renderCheckup(
 
   // TTY path: staggered reveal of the trust line and CHECKUP header, then
   // the rest prints normally. Never clears the screen at any point.
+  //
+  // v1.0.2: no score-box print here anymore. The closing card below (after
+  // the ending) is the ONLY box in the whole interactive run — one
+  // screenshot-worthy frame at the end, not two. Ending C's receipt total
+  // needs nothing extra "at the bottom" for this: the closing card reuses
+  // renderCard(), which itself wraps numberBox(), so the receipt's headline
+  // figure already lands there. Non-TTY/CI output is untouched (renderFull,
+  // used by the !opts.tty branch above, still prints its box up top — see
+  // render.ts's craft-laws comment: that snapshot must not change).
+  //
+  // Tail order (v1.0.2): ending -> closing card -> gap bars + verdict line
+  // -> share prompt. Gap bars moved from right after CHECKUP to right after
+  // the closing card, so the terminal's last frame mirrors the generated
+  // share image's own composition (cardimage.ts's buildCardSvg: hero block,
+  // then the gap-bars breakdown) — screenshot and card now read the same way.
   const ink = makeInk(!opts.noColor);
   // Reached only when opts.tty is true (see the !opts.tty branch above), so
   // this is always the Unicode table — ascii-ness tracks TTY-ness.
   const sym = makeSym(false);
   await staggerPrint(checkupLines(summary, ink, sym));
-  process.stdout.write("\n" + numberBox(summary, ink, sym) + "\n\n");
-  process.stdout.write(gapBars(summary, ink, false, sym).join("\n") + "\n\n");
-  process.stdout.write(wrappedLines(summary, ink, sym).join("\n") + "\n\n");
+  process.stdout.write("\n" + wrappedLines(summary, ink, sym, args.projects).join("\n") + "\n\n");
 
   const kind = decideEnding(summary);
-  const ending = renderEnding(summary, kind, ink, sym);
+  const ending = renderEnding(summary, kind, ink, sym, opts.planPrice);
   process.stdout.write(ending.lines.join("\n") + "\n\n");
-  process.stdout.write(shareRail(ink, sym).join("\n") + "\n");
+  process.stdout.write(shareRail(ink, sym, { closingCardFollows: true }).join("\n") + "\n");
 
-  return await maybeConsentFromEnding(args, summary, ending.needsConsent, ending.consentVerb);
+  const code = await maybeConsentFromEnding(args, summary, ending.needsConsent, ending.consentVerb);
+
+  // Closing card (v1.0.2, TTY full checkup only): the run ends by dealing
+  // your card — the exact `card` block re-printed as the final frame, so the
+  // tail of the terminal IS the screenshot. After the rail (and any consent
+  // flow, which would otherwise push it up), before the gap bars.
+  // Non-TTY/CI output is unchanged (this is the TTY branch only).
+  process.stdout.write("\n" + renderCard(summary, opts) + "\n");
+
+  // Gap bars + verdict line (moved here, v1.0.2 — see the tail-order comment
+  // above), after the closing card, before the share prompt.
+  process.stdout.write("\n" + gapBars(summary, ink, false, sym).join("\n") + "\n");
+
+  // Share CTA, after the gap bars (TTY path only — the non-TTY branch
+  // above never prompts). Fires every time (see maybeSharePrompt) unless
+  // suppressed by --no-share / CACHE_REFUND_NO_SHARE.
+  await maybeSharePrompt(summary, args.noShare, args.plan);
+  return code;
 }
 
 /** ~150ms stagger between CHECKUP's ✓✓⚠ lines, TTY only. */
@@ -410,7 +663,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * Standalone `cache-cash enable` / `cache-cash revert` (first-class
+ * Standalone `cache-refund enable` / `cache-refund revert` (first-class
  * subcommands). Runs BEFORE the analysis pipeline — the settings edit needs
  * no Summary, so a HOME with zero transcripts can still enable/revert;
  * enable/revert must work without any transcripts present, unlike the
@@ -429,7 +682,7 @@ function sleep(ms: number): Promise<void> {
 async function runStandaloneAction(args: Args): Promise<number> {
   const verb: "enable" | "revert" = args.subcommand === "enable" ? "enable" : "revert";
   const interactive = process.stdout.isTTY && !process.env.CI;
-  const verbLabel = verb === "enable" ? "Enable 1h now" : "Revert to 5m now";
+  const verbLabel = verb === "enable" ? "Claim your cache refund (sets 1h TTL)" : "Revert to 5m now";
 
   let confirmed = args.yes;
   if (!confirmed && interactive) {
@@ -439,7 +692,7 @@ async function runStandaloneAction(args: Args): Promise<number> {
     process.stdout.write(
       interactive
         ? "Nothing changed.\n"
-        : `(non-interactive: pass --yes to apply: \`cache-cash ${verb} --yes\`)\n`,
+        : `(non-interactive: pass --yes to apply: \`cache-refund ${verb} --yes\`)\n`,
     );
     return 0;
   }
@@ -458,6 +711,8 @@ async function runStandaloneAction(args: Args): Promise<number> {
       allTime: args.allTime,
       jsonMode: true,
       overrides: args.overrides,
+      branchOverride: args.branchOverride,
+      branchOverrideSource: args.branchOverride ? "flag" : undefined,
     });
     summary = r.summary ?? undefined;
   } catch {
@@ -465,6 +720,11 @@ async function runStandaloneAction(args: Args): Promise<number> {
   }
   const res = applyEnable({ home: homedir(), summary });
   process.stdout.write(res.message.join("\n") + "\n");
+  if (res.applied && summary) {
+    // High-emotion re-ask moment #1 (standalone `enable` route). Skipped
+    // when no Summary exists (empty corpus) — no numbers to fill a template.
+    await maybeSharePrompt(summary, args.noShare, args.plan, "post-enable");
+  }
   return 0;
 }
 
@@ -480,7 +740,7 @@ async function maybeConsentFromEnding(
   // (piped) also never prompts: print the manual instruction and exit 0 —
   // never prompt when not attached to a TTY.
   const interactive = process.stdout.isTTY && !process.env.CI;
-  const verbLabel = consentVerb === "enable" ? "Enable 1h now" : "Revert to 5m now";
+  const verbLabel = consentVerb === "enable" ? "Claim your cache refund (sets 1h TTL)" : "Revert to 5m now";
 
   let confirmed = args.yes;
   if (!confirmed && interactive) {
@@ -490,7 +750,7 @@ async function maybeConsentFromEnding(
   if (!confirmed) {
     if (!interactive && !args.yes) {
       process.stdout.write(
-        `\n(non-interactive: pass --yes to apply, or run \`cache-cash ${consentVerb}\` from a terminal)\n`,
+        `\n(non-interactive: pass --yes to apply, or run \`cache-refund ${consentVerb}\` from a terminal)\n`,
       );
     }
     return 0;
@@ -501,12 +761,36 @@ async function maybeConsentFromEnding(
       ? applyEnable({ home: homedir(), summary })
       : applyRevert({ home: homedir() });
   process.stdout.write("\n" + res.message.join("\n") + "\n");
+  if (res.applied && consentVerb === "enable") {
+    // High-emotion re-ask moment #1: right after a successful enable.
+    await maybeSharePrompt(summary, args.noShare, args.plan, "post-enable");
+  }
   return 0;
 }
 
-main()
-  .then((code) => process.exit(code))
-  .catch((err) => {
-    process.stderr.write(`cache-cash: ${err instanceof Error ? err.stack ?? err.message : String(err)}\n`);
-    process.exit(2);
-  });
+// ------------------------------------------------------------- entrypoint
+// Run only when executed directly (`node dist/cli.js`, the npm bin shim,
+// `npx cache-refund`) — never on import, so tests can reach the interactive
+// code paths without spawning the CLI as a side effect. The realpath step is
+// load-bearing: the npm bin entry is a symlink to dist/cli.js, and node
+// resolves the main module's import.meta.url through symlinks, so comparing
+// against a realpath'd argv[1] keeps the shim matching. If realpath fails
+// (argv[1] missing or unreadable), fall back to the raw path comparison.
+const entryHref = (() => {
+  const argv1 = process.argv[1];
+  if (!argv1) return null;
+  try {
+    return pathToFileURL(realpathSync(argv1)).href;
+  } catch {
+    return pathToFileURL(argv1).href;
+  }
+})();
+
+if (entryHref === import.meta.url) {
+  main()
+    .then((code) => process.exit(code))
+    .catch((err) => {
+      process.stderr.write(`cache-refund: ${err instanceof Error ? err.stack ?? err.message : String(err)}\n`);
+      process.exit(2);
+    });
+}

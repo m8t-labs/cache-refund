@@ -10,6 +10,17 @@
  *   ending (recommender: consent prompt · validator: certificate · receipt)
  *   share rail
  *
+ * This is renderFull()'s order, used byte-for-byte by the non-TTY/CI path
+ * (box included, up top; snapshot-pinned, never reordered). The
+ * TTY-interactive checkup (cli.ts's renderCheckup) reuses these same section
+ * functions directly but reshuffles the tail (v1.0.2): it SKIPS THE BOX up
+ * top and instead prints, in order, the ending, the closing card (a
+ * renderCard() call — the one screenshot-worthy box), THEN the gap bars +
+ * verdict line, then the share prompt. Bars-after-card mirrors the
+ * generated share image's own composition (cardimage.ts's buildCardSvg:
+ * hero block, then the gap-bars breakdown) — the terminal's last frame and
+ * the image you'd attach now read in the same order.
+ *
  * Plus alternate render modes: card (score box + top Wrapped line), --md
  * (plain markdown, zero ANSI), --compact (~15 lines), --explain (formulas
  * with the user's own numbers substituted).
@@ -32,6 +43,7 @@
 import type { LeakRow, Summary } from "./types.js";
 import {
   box,
+  boxWidth,
   fmtBar,
   fmtBarAscii,
   fmtDollars,
@@ -40,6 +52,8 @@ import {
   fmtTokensCompact,
   makeInk,
   makeSym,
+  stripAnsi,
+  type BoxLine,
   type Ink,
   type Sym,
   wrapLine,
@@ -52,13 +66,36 @@ export interface RenderOptions {
   tty: boolean;
   /** Color forced off (--no-color), independent of TTY. */
   noColor?: boolean;
+  /**
+   * Share-safe output by default (v1.0.1, privacy): human-facing output
+   * never prints project names unless the user opts in with `--projects`
+   * (local diagnosis). Applies to the Wrapped insight lines (biggest miss,
+   * biggest session) — the only human-render surfaces that carried project
+   * names. `--json` is machine mode and keeps its project fields regardless.
+   */
+  showProjects?: boolean;
+  /**
+   * `--plan <usd>` (monthly subscription price), display-only and CLI-supplied
+   * — never part of Summary, never affects any computed figure. When set AND
+   * the branch is subscription, renders the "~Nx your monthly plan, absorbed
+   * for free" line (see planMultiplierLine) on the receipt prose and the box.
+   * Undefined (the default) omits the line, same as any non-subscription
+   * branch.
+   */
+  planPrice?: number;
 }
 
-const BRAND = "cache-cash";
-const METHODOLOGY_HINT = "methodology: npx cache-cash --explain";
-/** Contains the `dot` decoration -> a function of `sym`, not a plain const. */
-function shareHint(sym: Sym): string {
-  return `share: npx cache-cash --compact  ${sym.dot}  #cachecash`;
+const BRAND = "cache-refund";
+const METHODOLOGY_HINT = "methodology: npx cache-refund --explain";
+/**
+ * Contains the `dot` decoration -> a function of `sym`, not a plain const.
+ * Exported so cardimage.ts's SVG card renders this exact string for its
+ * share rail — same single-source-of-truth discipline as absorbedDollars /
+ * planMultiplierLine / limitStretchLine below.
+ */
+export function shareHint(sym: Sym): string {
+  // v1.0.1: points at `card` (the canonical screenshot), not --compact.
+  return `share: npx cache-refund card  ${sym.dot}  #cacherefund`;
 }
 /** Contains a prose em dash -> a function of `sym`, not a plain const. */
 function watchTeaser(sym: Sym): string {
@@ -141,12 +178,49 @@ export function pickLoadingPun(rand: () => number = Math.random): string {
 }
 
 export function trustLine(ink: Ink, sym: Sym): string {
-  return ink.dim(`${BRAND} ${sym.dash} 100% local. Token counts + timestamps only. No content, no network.`);
+  return ink.dim(`${BRAND} ${sym.dash} 100% local. Token counts + timestamps. No content, no network.`);
 }
 
-export function scanCounterLine(filesScanned: number, filesTotal: number, pun: string, ink: Ink, sym: Sym): string {
-  const pct = filesTotal > 0 ? Math.round((filesScanned / filesTotal) * 100) : 100;
-  return ink.dim(`  scanning ${filesScanned}/${filesTotal} sessions (${pct}%) ${sym.dash} ${pun}`);
+/** Stateful in-place scan counter (v1.0.1 progress-line fix; replaces the old one-shot scanCounterLine). */
+export interface ScanProgress {
+  /**
+   * Next write payload for `done` of `total` files, or null when throttled
+   * (only emits when the integer percent advances, so a 21.7k-file corpus
+   * writes ~100 frames, not 21.7k). Every payload starts with "\r" and
+   * right-pads to the longest frame so far, so it can only ever rewrite the
+   * progress line itself — never anything above it (no-screen-clear law).
+   */
+  frame(done: number, total: number): string | null;
+  /**
+   * Final payload, REQUIRED after the run resolves: erases the progress line
+   * (overwrite with spaces + "\r") so no stale "scanning 0/1 (0%)" frame is
+   * left above the CHECKUP section — which already shows the final counts,
+   * so clearing (not rewriting to 100%) is the finalized state.
+   */
+  finish(): string;
+}
+
+export function makeScanProgress(pun: string, ink: Ink, sym: Sym): ScanProgress {
+  let lastPct = -1;
+  let maxLen = 0;
+  return {
+    frame(done: number, total: number): string | null {
+      const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+      if (pct === lastPct) return null;
+      lastPct = pct;
+      // Before discovery reports a total (the initial frame), show no counts
+      // rather than a made-up "0/1".
+      const counts = total > 0 ? `${done.toLocaleString()}/${total.toLocaleString()} sessions (${pct}%)` : "sessions…";
+      const line = ink.dim(`  scanning ${counts} ${sym.dash} ${pun}`);
+      const visLen = stripAnsi(line).length;
+      const pad = Math.max(0, maxLen - visLen);
+      if (visLen > maxLen) maxLen = visLen;
+      return `\r${line}${" ".repeat(pad)}`;
+    },
+    finish(): string {
+      return `\r${" ".repeat(maxLen)}\r`;
+    },
+  };
 }
 
 // ----------------------------------------------------------------- checkup
@@ -171,50 +245,91 @@ export function checkupLines(s: Summary, ink: Ink, sym: Sym): string[] {
 // ------------------------------------------------------------- score box
 
 /**
- * THE NUMBER: the <=57-col brandmarked score box. Also `card`'s top box.
+ * THE NUMBER: the <=57-col branded score box. Also `card`'s top box.
  * Ending-aware: endings A/B lead with the efficiency score; ending C
  * (subscription receipt) leads with the $-equivalent 1h-vs-5m receipt figure
  * — the receipt's headline number — with the score as the second line. The
  * ending kind is derived internally from the Summary (decideEnding) so
  * callers' signatures are unchanged.
+ *
+ * v1.0.1: the brand is woven into the TOP BORDER (`╭─── cache-refund ───…──╮`,
+ * tinted ink.brand) instead of a dim interior row — a recognizable frame in
+ * screenshots on any theme, one line shorter. All three endings share this
+ * frame (recognizability is the point); the certificate box uses it too.
  */
-export function numberBox(s: Summary, ink: Ink, sym: Sym): string {
+const BOX_FRAME = (ink: Ink) => ({ brand: BRAND, tint: ink.brand });
+
+/**
+ * Absolute-scale line for the box (v1.0.1): `9.2B tokens · 593 sessions` —
+ * the flex for users whose dollar delta is modest. Token total = every token
+ * the analysis actually covered (creation + reads).
+ */
+function scaleLine(s: Summary, sym: Sym): string {
+  const total = s.tokens.creationTotal + s.tokens.readTotal;
+  return `${fmtTokensCompact(total)} tokens ${sym.dot} ${s.scope.sessions.toLocaleString()} sessions`;
+}
+
+/**
+ * The box's scale-line row, plus up to two optional dim rows under it: the
+ * absorbed-dollars flex (absorbedDollars, positive-only) and the `--plan`
+ * multiplier (planMultiplierLine, subscription-branch-only). Both are
+ * width-law-checked here — see format.ts's box() width law (<=57 cols
+ * total, BOX_INNER visible chars) — so a pathological dollar figure shortens
+ * its wording rather than ever widening the box.
+ */
+function scaleRows(s: Summary, ink: Ink, sym: Sym, planPrice?: number): BoxLine[] {
+  const rows: BoxLine[] = [{ text: ink.dim(scaleLine(s, sym)) }];
+  const absorbed = absorbedDollars(s);
+  if (absorbed !== null) {
+    const long = fmtAbsorbed(absorbed, false);
+    const text = long.length <= boxWidth - 2 ? long : fmtAbsorbed(absorbed, true);
+    rows.push({ text: ink.dim(text) });
+  }
+  const plan = planMultiplierLine(s, planPrice);
+  if (plan !== null) rows.push({ text: ink.dim(plan) });
+  return rows;
+}
+
+export function numberBox(s: Summary, ink: Ink, sym: Sym, planPrice?: number): string {
   const kind = decideEnding(s);
   const score = s.efficiencyScore.toFixed(1);
 
   if (kind === "C") {
     const delta = s.counterfactual.delta1hMinus5m;
-    // Box-safe short form of the receipt headline; "-eq" is the box-width
-    // currency marker (full "USD-equivalent (API list rates)" is prose-only).
+    // Box-safe short form of the receipt headline. The box travels alone as a
+    // screenshot, so it spells the currency out ("in API-value") instead of
+    // the -eq marker the legended report sections use.
     const fig =
       delta < 0
-        ? `saved ~${fmtDollars(Math.abs(delta))}-eq vs 5m (${windowLabelShort(s)})`
-        : `~${fmtDollars(delta)}-eq costlier than 5m (${windowLabelShort(s)})`;
+        ? `saved ~${fmtDollars(Math.abs(delta))} in API-value (${windowLabelShort(s)})`
+        : `~${fmtDollars(delta)} costlier than 5m (${windowLabelShort(s)})`;
     const figColor = delta < 0 ? ink.green : ink.yellow;
     return box(
       [
-        { text: ink.dim(BRAND) },
         { text: "" },
         { text: "YOUR 1H CACHE RECEIPT" },
         { text: figColor(ink.bold(fig)) },
         { text: "" },
         { text: ink.dim(`efficiency score: ${score} / 100`) },
+        ...scaleRows(s, ink, sym, planPrice),
       ],
       sym.ascii,
+      BOX_FRAME(ink),
     );
   }
 
   const scoreColor = s.efficiencyScore >= 90 ? ink.green : s.efficiencyScore >= 70 ? ink.yellow : ink.red;
   return box(
     [
-      { text: ink.dim(BRAND) },
       { text: "" },
       { text: "CACHE EFFICIENCY SCORE" },
       { text: scoreColor(ink.bold(`${score} / 100`)) },
       { text: "" },
       { text: ink.dim(scoreLabel(s.efficiencyScore, sym, kind)) },
+      ...scaleRows(s, ink, sym, planPrice),
     ],
     sym.ascii,
+    BOX_FRAME(ink),
   );
 }
 
@@ -278,19 +393,22 @@ export function verdictLine(s: Summary, ink: Ink, sym: Sym): string {
  * something the analyzer attributes). biggestMiss/worstDay may be null
  * (empty corpus) — guarded out, not padded.
  */
-export function wrappedLines(s: Summary, ink: Ink, sym: Sym): string[] {
+export function wrappedLines(s: Summary, ink: Ink, sym: Sym, showProjects = false): string[] {
   interface Candidate {
     extremity: number; // sort key, higher = more extreme/interesting
     text: string;
   }
   const w = s.wrapped;
   const cands: Candidate[] = [];
+  // Share-safe by default (v1.0.1): the " in <project>" clause only renders
+  // when the user opted in via --projects; both lines read clean without it.
+  const inProject = (project: string) => (showProjects ? ` in ${shortProject(project)}` : "");
 
   if (s.biggestMiss) {
     const m = s.biggestMiss;
     cands.push({
       extremity: m.dollars * 1000, // dollars dominate ranking; biggest single event first
-      text: `Your biggest single miss: a ${fmtTokensCompact(m.tokens)}-token re-warm in ${shortProject(m.project)} ${sym.dash} ${fmtDollarsEq(s, m.dollars)} in one turn.`,
+      text: `Your biggest single miss: a ${fmtTokensCompact(m.tokens)}-token re-warm${inProject(m.project)} ${sym.dash} ${fmtDollarsEq(s, m.dollars)} in one turn.`,
     });
   }
   if (s.worstDay) {
@@ -315,7 +433,7 @@ export function wrappedLines(s: Summary, ink: Ink, sym: Sym): string[] {
   if (w.biggestSessionCreation > 0) {
     cands.push({
       extremity: w.biggestSessionCreation / 1000,
-      text: `Your biggest session wrote ${fmtTokensCompact(w.biggestSessionCreation)} tokens of cache in ${shortProject(w.biggestSessionProject)}.`,
+      text: `Your biggest session wrote ${fmtTokensCompact(w.biggestSessionCreation)} tokens of cache${inProject(w.biggestSessionProject)}.`,
     });
   }
   const modelSwitch = s.leaks.find((l) => l.cause === "model-switch");
@@ -380,7 +498,7 @@ export interface EndingRender {
   consentVerb?: "enable" | "revert";
 }
 
-export function renderEnding(s: Summary, kind: EndingKind, ink: Ink, sym: Sym): EndingRender {
+export function renderEnding(s: Summary, kind: EndingKind, ink: Ink, sym: Sym, planPrice?: number): EndingRender {
   switch (kind) {
     case "A-enable":
       return endingEnable(s, ink, sym);
@@ -389,7 +507,7 @@ export function renderEnding(s: Summary, kind: EndingKind, ink: Ink, sym: Sym): 
     case "B":
       return endingCertified(s, ink, sym);
     case "C":
-      return endingReceipt(s, ink, sym);
+      return endingReceipt(s, ink, sym, planPrice);
   }
 }
 
@@ -438,9 +556,10 @@ function endingCertified(s: Summary, ink: Ink, sym: Sym): EndingRender {
     cachingDelta >= 0
       ? `caching saved you ${fmtDollars(cachingDelta)} vs uncached`
       : `caching cost ${fmtDollars(Math.abs(cachingDelta))} more than uncached`;
+  // Same branded frame as the Beat-2 box (recognizability across endings);
+  // interior brand row removed with it.
   const certBox = box(
     [
-      { text: ink.dim(BRAND) },
       { text: "" },
       { text: ink.green(ink.bold(`CERTIFIED OPTIMAL ${sym.check}`)) },
       { text: "" },
@@ -449,6 +568,7 @@ function endingCertified(s: Summary, ink: Ink, sym: Sym): EndingRender {
       { text: ink.dim(`you're on ${onWhat} ${sym.dash} the cheaper TTL for your pattern`) },
     ],
     sym.ascii,
+    BOX_FRAME(ink),
   );
   const verdict =
     s.branch === "api-1h"
@@ -482,6 +602,65 @@ function uncachedCost(s: Summary): number {
     total += (m.creation5m + m.creation1h + m.read) * P;
   }
   return total;
+}
+
+/**
+ * The "absorbed $X of API-value" figure: the same uncachedCost - actualCost
+ * delta cachingSavedLine renders, rounded to the dollar (Math.round, no
+ * cents — a headline flex, not a ledger line, same discipline as
+ * cardimage.ts's fmtHeroDollars). Positive-only: mirrors cachingSavedLine's
+ * write-heavy/read-light subject (caching can genuinely cost more than
+ * uncached — see that function's comment) but OMITS rather than flips,
+ * since there is nothing to have "absorbed" when caching cost more. Exported
+ * so cardimage.ts's SVG card renders the exact same figure as the terminal
+ * box/prose, never a second, independently-drifting derivation.
+ */
+export function absorbedDollars(s: Summary): number | null {
+  const delta = uncachedCost(s) - s.counterfactual.actualCost;
+  return delta > 0 ? Math.round(delta) : null;
+}
+
+/**
+ * Format an already-computed absorbedDollars() figure. `short=true` drops
+ * the " of" for width-constrained callers (the box, when the long form would
+ * push a line past BOX_INNER — see scaleRows). Literal "API-value" wording
+ * rather than "-eq": the figure is ALWAYS priced at API list rates on every
+ * branch (see uncachedCost's per-model basePrice math), so no branch-specific
+ * qualifier is needed — subscriber output already carries the broader
+ * qualifier elsewhere (the receipt's currency line, the card's footer).
+ */
+export function fmtAbsorbed(n: number, short = false): string {
+  const amount = `$${n.toLocaleString("en-US")}`;
+  return short ? `absorbed ${amount} API-value` : `absorbed ${amount} of API-value`;
+}
+
+/**
+ * "~Nx your monthly plan, absorbed for free" (`--plan <usd>`, subscription
+ * branch only). The plan price is MONTHLY, so the absorbed figure must be
+ * normalized to a month before dividing — comparing a 90-day window's total
+ * against one month's fee would inflate N ~3x:
+ *
+ *   N = (absorbed / spanDays * 30) / planPrice, one decimal
+ *
+ * ASCII-safe tilde and lowercase "x" (not "≈"/"×") so this stays byte-clean
+ * on the non-TTY/CI path, matching every other approximate figure in this
+ * file (e.g. endingEnable's "saves ~$X/30d"). Single source of truth for
+ * this file's box + prose AND cardimage.ts's SVG card (imported there) —
+ * same figure, same wording, every surface. `planPrice` is CLI-supplied
+ * (--plan), never part of Summary — display-only, never affects any computed
+ * figure. Returns null (omit the line) when planPrice is unset, the branch
+ * isn't subscription, the span is too short to normalize (< 1 day), or
+ * there's no positive absorbed figure (mirrors absorbedDollars' omit rule).
+ */
+export function planMultiplierLine(s: Summary, planPrice: number | undefined): string | null {
+  if (planPrice === undefined || s.branch !== "subscription") return null;
+  const absorbed = absorbedDollars(s);
+  if (absorbed === null) return null;
+  const spanDays = s.counterfactual.spanDays;
+  if (!(spanDays >= 1)) return null;
+  const absorbedPerMonth = (absorbed / spanDays) * 30;
+  const n = absorbedPerMonth / planPrice;
+  return `~${n.toFixed(1)}x your monthly plan, absorbed for free`;
 }
 
 /**
@@ -549,20 +728,66 @@ function receiptHeadline(s: Summary, sym: Sym): string {
   return `A 5m world would have cost ~${fmtDollars(delta)} ${s.currency} less ${windowLabel(s)} ${sym.dash} unusual for a subscription pattern.`;
 }
 
-function endingReceipt(s: Summary, ink: Ink, sym: Sym): EndingRender {
+/**
+ * The subscriber paradox explainer (right after the vs-uncached line): the
+ * receipt's headline dollar figures can look implausibly large next to a
+ * flat-priced plan — this line is the one-sentence "why" (subscription
+ * usage is metered at API list rates internally, which is also why the -eq
+ * figures are anchored/reproducible even though they're not a bill).
+ * Contains a prose em dash -> a function of `sym`, not a plain const (same
+ * discipline as watchTeaser above: non-TTY/CI must stay byte-clean ASCII).
+ */
+function subscriberParadoxLine(sym: Sym): string {
+  return `Subscription usage is metered at API-value rates ${sym.dash} that's how a $-priced plan absorbs this much, and why your limits stretch as far as they do.`;
+}
+
+/**
+ * The limit-stretch multiples (subscription branch only): how much MORE of
+ * the user's usage limit the same work would have metered under a 5m cache,
+ * and under no cache at all. Pure arithmetic on billed tokens — it needs no
+ * knowledge of the (undisclosed) limit formula, only the one assumption the
+ * receipt already states: usage is metered cost-weighted at API-value rates.
+ * Under that assumption, X× the cost-weighted usage is X× the limit consumed,
+ * whatever the limit is. Returns null off-branch, or when the 1h cache isn't
+ * actually ahead (never claim a stretch that isn't there).
+ */
+export function limitMultiples(s: Summary): { pct5m: number; xUncached: number } | null {
+  if (s.branch !== "subscription") return null;
+  const actual = s.counterfactual.actualCost;
+  if (!(actual > 0)) return null;
+  const m5 = s.counterfactual.cost5m / actual;
+  const mU = uncachedCost(s) / actual;
+  if (m5 <= 1 || mU <= 1) return null;
+  return { pct5m: Math.round((m5 - 1) * 100), xUncached: mU };
+}
+
+/** ASCII-safe prose line for limitMultiples; null when the multiples are. */
+export function limitStretchLine(s: Summary): string | null {
+  const m = limitMultiples(s);
+  if (m === null) return null;
+  return `Same work on a 5m cache: ~${m.pct5m}% more of your usage limit. Uncached: ~${m.xUncached.toFixed(1)}x.`;
+}
+
+function endingReceipt(s: Summary, ink: Ink, sym: Sym, planPrice?: number): EndingRender {
   const pctReceived1h = s.ttlRealityCheck.received === "1h";
   // Line 3 of the receipt: the TTL verification. Percentage is the 1h WRITE
   // SHARE for the analyzed window (oneHourWriteShare), not R/C.
   const verifyLine = pctReceived1h
     ? `1h already yours, verified in your transcripts: ${fmtPct(oneHourWriteShare(s))} of writes are 1h ${sym.check}`
     : `TTL received (last ${s.ttlRealityCheck.windowDays}d): ${s.ttlRealityCheck.received} ${sym.dash} subscriptions get 1h automatically; if you're seeing 5m, an overage likely dropped you to API rates.`;
+  const plan = planMultiplierLine(s, planPrice);
   const lines: string[] = [
     ink.bold("YOUR RECEIPT"),
     "",
     // Ordering is load-bearing (snapshot-tested):
-    // 1) the 1h-vs-5m counterfactual headline, 2) vs-uncached, 3) verification.
+    // 1) the 1h-vs-5m counterfactual headline, 2) vs-uncached, 3) the
+    // subscriber-paradox explainer (+ the optional --plan multiplier),
+    // 4) verification.
     ...wrapTerm(receiptHeadline(s, sym)).map((l) => ink.bold(l)),
     ...wrapTerm(cachingSavedLine(s, sym)),
+    ...wrapTerm(subscriberParadoxLine(sym)),
+    ...(limitStretchLine(s) !== null ? wrapTerm(limitStretchLine(s)!) : []),
+    ...(plan !== null ? wrapTerm(plan) : []),
     ...wrapTerm(verifyLine),
     "",
     ink.bold("QUOTA-LEAK LIST") + ink.dim(` ($-equivalent, API list rates ${sym.dash} not a bill)`),
@@ -587,8 +812,107 @@ function leakRowsForDisplay(leaks: LeakRow[]): LeakRow[] {
 
 // -------------------------------------------------------------- share rail
 
-export function shareRail(ink: Ink, sym: Sym): string[] {
+export function shareRail(ink: Ink, sym: Sym, opts?: { closingCardFollows?: boolean }): string[] {
+  // When the closing card follows (TTY checkups), it carries the share line
+  // itself — printing the hint here too would duplicate it on screen.
+  if (opts?.closingCardFollows) return [ink.dim(METHODOLOGY_HINT)];
   return [ink.dim(METHODOLOGY_HINT), ink.dim(shareHint(sym))];
+}
+
+// ---------------------------------------------------------- share templates
+
+const SHARE_CTA_TAIL = "npx cache-refund #cacherefund";
+const SHARE_BUDGET = 280;
+
+/**
+ * Share of the cache bill the 1h-vs-5m delta represents, as a whole percent,
+ * clamped to [1, 99] (v1.0.2: tweets get percentage framing in plain
+ * English; the terminal keeps its labeled dollar conventions).
+ */
+function billSharePct(delta: number, denom: number): number {
+  if (denom <= 0) return 1;
+  return Math.min(99, Math.max(1, Math.round((Math.abs(delta) / denom) * 100)));
+}
+
+/** windowLabel without its leading preposition, for "over <window>" contexts. */
+function windowPhrase(s: Summary): string {
+  return windowLabel(s).replace(/^in /, "").replace(/^over /, "");
+}
+
+/**
+ * Prefilled social-post text for the share CTA, per ending. Rules (v1.0.2):
+ *   - NEVER includes project names (share-safe by construction — only
+ *     aggregate numbers).
+ *   - Plain English, no terminal jargon: no "-eq", no "5m world" — the
+ *     subscriber form says "in API-value" (the honest plain-English form of
+ *     the $-equivalent rule; never a bare "saved $" for subscribers) and
+ *     the money is framed as a percentage of the cache bill.
+ *   - <= 280 chars after substitution; the absolute-scale clause is the
+ *     first thing truncated if a pathological corpus overflows the budget.
+ *   - Social prose, not terminal output: real em dashes / middle dots
+ *     (the ASCII law is a terminal law; these strings go to intent URLs
+ *     and the clipboard).
+ */
+export function shareTemplate(s: Summary, context: "checkup" | "post-enable" | "recheck" = "checkup"): string {
+  const kind = decideEnding(s);
+  const cf = s.counterfactual;
+  const score = s.efficiencyScore.toFixed(1);
+  const tokens = fmtTokensCompact(s.tokens.creationTotal + s.tokens.readTotal);
+  const sessions = s.scope.sessions.toLocaleString();
+
+  // The just-claimed moments get the t-shirt-meme humblebrag: the person who
+  // flipped the flag deserves the enterprise flex. delta30d = the monthly
+  // figure (projection at post-enable, receipts-backed at recheck).
+  if ((context === "post-enable" || context === "recheck") && (kind === "A-enable" || kind === "A-revert")) {
+    const monthly = fmtDollars(Math.abs(cf.delta30d), 0);
+    const verb = context === "recheck" ? "saved my company" : "just claimed a cache refund of";
+    return `I ${verb} ~${monthly}/month on our AI coding bill — and all I got was this lousy card. ${SHARE_CTA_TAIL}`;
+  }
+
+  let full: string;
+  let scaleClause: string;
+
+  if (kind === "A-enable" || kind === "A-revert") {
+    // pct denominator = the cache bill in the world the reader is stuck in
+    // today: the 5m bill for enable, their current 1h bill for revert.
+    const pct = billSharePct(cf.delta1hMinus5m, kind === "A-enable" ? cf.cost5m : cf.cost1h);
+    scaleClause = ""; // A's template carries no scale clause
+    full =
+      `cache-refund found ${fmtDollars(Math.abs(cf.delta1hMinus5m))} I'm leaving on the table — ` +
+      `${pct}% of my Claude Code cache bill, recoverable with one config line. ` +
+      `Check yours: ${SHARE_CTA_TAIL}`;
+  } else if (kind === "B") {
+    const setting = s.branch === "api-1h" ? "My 1-hour cache setting" : "The default cache setting";
+    scaleClause = `, verified over ${tokens} tokens`;
+    full =
+      `Ran cache-refund expecting bad news — CERTIFIED OPTIMAL ${score}/100. ` +
+      `${setting} is actually right for how I work${scaleClause}. ` +
+      SHARE_CTA_TAIL;
+  } else {
+    const pct = billSharePct(cf.delta1hMinus5m, cf.cost5m);
+    scaleClause = `, across ${tokens} tokens · ${sessions} sessions`;
+    // Limit framing, not cost framing: a subscriber's tweet-reader doesn't
+    // pay per token — the relatable unit is their usage limit. Same pct
+    // (share of the would-be metered usage the 1h cache avoids); the
+    // cost-weighted-metering assumption is documented in METHODOLOGY.
+    full =
+      `My 1h prompt cache frees ~${pct}% of my Claude Code usage limit — ` +
+      `≈${fmtDollars(Math.abs(cf.delta1hMinus5m))} of API-value over ${windowPhrase(s)}` +
+      `${scaleClause}. ${SHARE_CTA_TAIL}`;
+  }
+
+  if (full.length > SHARE_BUDGET && scaleClause.length > 0) {
+    full = full.replace(scaleClause, "");
+  }
+  // Belt-and-braces: if a pathological corpus still overflows, hard-trim
+  // ahead of the CTA tail so the npx command always survives intact.
+  if (full.length > SHARE_BUDGET) {
+    const tailIdx = full.lastIndexOf(SHARE_CTA_TAIL);
+    const head = full.slice(0, tailIdx).trimEnd();
+    const room = SHARE_BUDGET - SHARE_CTA_TAIL.length - 2;
+    full = `${head.slice(0, room).trimEnd()}… ${SHARE_CTA_TAIL}`;
+  }
+  return full;
 }
 
 // -------------------------------------------------------------- full render
@@ -614,18 +938,18 @@ export function renderFull(s: Summary, opts: RenderOptions): FullRenderResult {
   const useAscii = !opts.tty;
   const sym = makeSym(!opts.tty);
   const kind = decideEnding(s);
-  const ending = renderEnding(s, kind, ink, sym);
+  const ending = renderEnding(s, kind, ink, sym, opts.planPrice);
 
   const lines: string[] = [];
   lines.push(trustLine(ink, sym));
   lines.push("");
   lines.push(...checkupLines(s, ink, sym));
   lines.push("");
-  lines.push(numberBox(s, ink, sym));
+  lines.push(numberBox(s, ink, sym, opts.planPrice));
   lines.push("");
   lines.push(...gapBars(s, ink, useAscii, sym));
   lines.push("");
-  lines.push(...wrappedLines(s, ink, sym));
+  lines.push(...wrappedLines(s, ink, sym, opts.showProjects === true));
   lines.push("");
   lines.push(...ending.lines);
   lines.push("");
@@ -640,8 +964,8 @@ export function renderFull(s: Summary, opts: RenderOptions): FullRenderResult {
 export function renderCard(s: Summary, opts: RenderOptions): string {
   const ink = makeInk(opts.tty && !opts.noColor);
   const sym = makeSym(!opts.tty);
-  const top = wrappedLines(s, ink, sym).slice(1, 2); // first insight line only (already prefixed with "  » ")
-  const lines = [numberBox(s, ink, sym), "", ...top, "", shareRail(ink, sym)[1]];
+  const top = wrappedLines(s, ink, sym, opts.showProjects === true).slice(1, 2); // first insight line only (already prefixed with "  » ")
+  const lines = [numberBox(s, ink, sym, opts.planPrice), "", ...top, "", shareRail(ink, sym)[1]];
   return lines.join("\n");
 }
 
@@ -663,7 +987,7 @@ export function renderCompact(s: Summary, opts: RenderOptions): string {
   if (s.worstDay) {
     lines.push(`worst day: ${s.worstDay.day} ${sym.dash} ${fmtDollarsEq(s, s.worstDay.dollars)} leaked`);
   }
-  const wl = wrappedLines(s, ink, sym).slice(1, 3);
+  const wl = wrappedLines(s, ink, sym, opts.showProjects === true).slice(1, 3);
   lines.push(...wl);
   lines.push(shareRail(ink, sym)[1]);
   return lines.join("\n");
@@ -702,9 +1026,9 @@ export function renderMarkdown(s: Summary): string {
   }
   lines.push("");
   if (kind === "A-enable") {
-    lines.push(`**Verdict:** switching to the 1h TTL saves ~${fmtDollars(Math.abs(cf.delta30d))}/30d. Run \`npx cache-cash enable\` to apply.`);
+    lines.push(`**Verdict:** switching to the 1h TTL saves ~${fmtDollars(Math.abs(cf.delta30d))}/30d. Run \`npx cache-refund enable\` to apply.`);
   } else if (kind === "A-revert") {
-    lines.push(`**Verdict:** 5m would cost ~${fmtDollars(Math.abs(cf.delta30d))}/30d less for this pattern. Run \`npx cache-cash revert\` to apply.`);
+    lines.push(`**Verdict:** 5m would cost ~${fmtDollars(Math.abs(cf.delta30d))}/30d less for this pattern. Run \`npx cache-refund revert\` to apply.`);
   } else if (kind === "B") {
     lines.push(`**Verdict:** certified optimal ✓ — you're on the cheaper TTL for your pattern.`);
   } else {

@@ -1,5 +1,5 @@
 /**
- * Core data contracts for cachecash.
+ * Core data contracts for cache-refund.
  *
  * This file freezes two stable interfaces:
  *   {@link TurnEvent} — the parse output, produced by parse.ts and consumed

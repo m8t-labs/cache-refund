@@ -50,7 +50,7 @@ const enabled = corpusPresent && pythonPresent;
 let tmpHome: string | null = null;
 function frozenHome(): string {
   if (tmpHome) return tmpHome;
-  const dir = mkdtempSync(join(tmpdir(), "cachecash-parity-"));
+  const dir = mkdtempSync(join(tmpdir(), "cache-refund-parity-"));
   // Clone the real corpus (APFS copy-on-write where available) so live writes
   // to any transcript can't change the numbers mid-test.
   cpSync(REAL_PROJECTS, join(dir, ".claude", "projects"), { recursive: true });

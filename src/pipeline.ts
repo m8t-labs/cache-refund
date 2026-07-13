@@ -22,6 +22,16 @@ export interface RunOptions {
   home?: string;
   /** See verdict.ts BuildSummaryInput.branchOverride. */
   branchOverride?: Branch;
+  /** See verdict.ts BuildSummaryInput.branchOverrideSource. */
+  branchOverrideSource?: "interactive" | "flag";
+  /**
+   * Additive (v1.0.1): live-progress hook for the CLI's in-place scan
+   * counter — called after each transcript file finishes parsing with
+   * (filesDone, filesTotal). Purely observational: never affects parsing,
+   * ordering, or the Summary. Undefined (the default, every existing call
+   * site) is a no-op.
+   */
+  onFileParsed?: (done: number, total: number) => void;
 }
 
 export interface RunResult {
@@ -44,6 +54,7 @@ export async function run(opts: RunOptions): Promise<RunResult> {
 
   const seenIds = new Set<string>();
   const events: TurnEvent[] = [];
+  let filesDone = 0;
   for (const file of files) {
     const parseOpts: ParseOptions = {
       cutoff,
@@ -51,6 +62,8 @@ export async function run(opts: RunOptions): Promise<RunResult> {
       project: projectOf(file),
     };
     await parseFile(file, parseOpts, events);
+    filesDone++;
+    opts.onFileParsed?.(filesDone, files.length);
   }
 
   const agg = analyze(events);
@@ -66,6 +79,7 @@ export async function run(opts: RunOptions): Promise<RunResult> {
     jsonMode: opts.jsonMode === true,
     ctx,
     branchOverride: opts.branchOverride,
+    branchOverrideSource: opts.branchOverrideSource,
   });
 
   return { summary, fileCount: files.length, code: 0 };

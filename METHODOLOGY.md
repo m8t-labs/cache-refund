@@ -1,10 +1,10 @@
 # METHODOLOGY
 
-How `cache-cash` turns your transcripts into a verdict, with every constant
+How `cache-refund` turns your transcripts into a verdict, with every constant
 sourced and every formula reproducible. This document describes the code as
 **implemented** in [`src/costmodel.ts`](./src/costmodel.ts) and
 [`src/pricing.ts`](./src/pricing.ts) — not an idealized model. Run
-`npx cache-cash --explain` to see all of it with your own numbers substituted in.
+`npx cache-refund --explain` to see all of it with your own numbers substituted in.
 
 - **`score_version: 1`** (printed in `--json`; the efficiency score is only
   comparable within one score version).
@@ -94,7 +94,7 @@ summary.
 
 ## 4. The symmetric counterfactual
 
-The break-even above is the pure-5m intuition. The actual delta `cache-cash`
+The break-even above is the pure-5m intuition. The actual delta `cache-refund`
 reports is computed by a **symmetric, regime-aware counterfactual**: it prices
 what a *fully-5m world* and a *fully-1h world* would each bill on your exact
 tokens, then subtracts. This is `counterfactual()` in `src/costmodel.ts`.
@@ -145,12 +145,12 @@ tail = min( median(warm-turn creation in this session),  creation )
 
 This is the model's **one and only approximation**. It is bounded above by the
 warm-median, so it is small relative to the recoverable creation it replaces
-(on the author's corpus the total tail term is `$39.30` against a 5m write cost
+(on the author's corpus the total tail term is `$39.23` against a 5m write cost
 of thousands — the parity test asserts it stays under 5% of 5m write cost).
 
 ## 5. Relationship to the oracle (the exact identity)
 
-`cache-cash`'s TypeScript analyzer is cross-checked against an independent Python
+`cache-refund`'s TypeScript analyzer is cross-checked against an independent Python
 oracle ([`tools/oracle/analyze_cache_ttl.py`](./tools/oracle/analyze_cache_ttl.py))
 on the author's real corpus. **Bucket totals, token totals, turn counts, R_read,
 and R/C match the oracle exactly.** The delta differs by a *named, exact
@@ -294,8 +294,8 @@ Session warm-median = median{400k} = 400k.
 The **sign-flip** case is the `regime-1h.jsonl` fixture (the subscriber shape):
 a recoverable turn served as a pure read (creation 0, read 1.2M) gives
 cost5m $17.275 vs cost1h $16.00 ⇒ **delta −$1.275**, i.e. 1h cheaper. That is the
-shape of the author's real corpus, where the symmetric delta is **−$2,506.47**
-(1h cheaper) over 84.1 analyzed days while the naive creation-only oracle would
+shape of the author's real corpus, where the symmetric delta is **−$2,517.98**
+(1h cheaper) over 84.3 analyzed days while the naive creation-only oracle would
 have reported 1h as *more* expensive.
 
 ## 11. Two delta fields — do not mix them
@@ -303,10 +303,10 @@ have reported 1h as *more* expensive.
 `--json` exposes both, and conflating them is how a wrong-number argument starts:
 
 - **`counterfactual.delta1hMinus5m`** — the delta over the **analyzed window**
-  (e.g. "saved ~$2,506.47 vs 5m in the last 90 days"). This is what the receipt
+  (e.g. "saved ~$2,517.98 vs 5m in the last 90 days"). This is what the receipt
   headline and the card show, always labeled with its window.
 - **`counterfactual.delta30d`** — the same delta **normalized to a rolling 30
-  days** (`delta / spanDays · 30`, here −$894.32 over an 84.1-day span). This is
+  days** (`delta / spanDays · 30`, here −$895.84 over an 84.3-day span). This is
   what the recommendation line uses ("saves ~$X per 30d").
 
 The receipt/card figure is **never** labeled "/30d"; the "/30d" label belongs
@@ -325,19 +325,42 @@ only to `delta30d`.
   cache strategies against real billed tokens have shown simple threshold
   policies beating fitted models on bursty human arrival patterns — in one such
   backtest, six modeled strategies all lost to a one-line heuristic.
-  `cache-cash` ships the threshold (39.47%) and defers the full simulator to v2
+  `cache-refund` ships the threshold (39.47%) and defers the full simulator to v2
   for exactly this reason.
 - **Published pricing, re-derived.** The per-TTL write multipliers (1.25× / 2×)
   and the 0.1× read rate come from Anthropic's published pricing tables and are
   re-derived per model in `src/pricing.ts` (URL + retrieval date cited there).
 
-## 13. "Backtested against N weeks of real usage"
+## 13. Limit framing on the subscription branch (multiples, never absolutes)
 
-Every number `cache-cash` prints is computed over **your own real transcripts**
+Subscribers don't pay per token — their currency is the usage limit. The limit
+formula itself is undisclosed, so `cache-refund` never claims an absolute
+("you saved 9% of your weekly limit"). What it does claim is a **ratio of your
+own metered usage**, which needs exactly one assumption — the same one the
+receipt already states: *subscription usage is metered cost-weighted at
+API-value rates.* Under that assumption, X× the cost-weighted usage is X× the
+limit consumed, whatever the limit actually is:
+
+```
+5m-cache multiple   = cost5m   / actual     (e.g. 1.09 -> "~9% more of your usage limit")
+uncached multiple   = uncached / actual     (e.g. 3.0  -> "~3.0x")
+```
+
+Both numerators are the same counterfactuals derived in §4; `actual` is the
+ground-truth reconstruction. The line renders only on the subscription branch
+and only when the 1h cache is genuinely ahead (`limitMultiples` in
+`src/render.ts` returns null otherwise — the tool never claims a stretch that
+isn't there). This is also how a $-priced plan "absorbs" tens of thousands of
+dollars of API-value: the plan meters your usage in that currency; it doesn't
+bill it.
+
+## 14. "Backtested against N weeks of real usage"
+
+Every number `cache-refund` prints is computed over **your own real transcripts**
 for the selected window — there is no synthetic model of your behavior. The
 author's launch figures are computed over **590 sessions / 43,783 turns spanning
 84 days** of real Claude Code usage. The oracle cross-check (bucket-exact,
 delta-exact-to-a-named-correction), the golden unit fixtures, and a
 hand-re-derivation of every number in the launch screenshot are the trust
-surface. Every claim in a checkup is traceable: **`npx cache-cash --explain`
+surface. Every claim in a checkup is traceable: **`npx cache-refund --explain`
 prints the formula with your inputs, and this document derives every constant.**

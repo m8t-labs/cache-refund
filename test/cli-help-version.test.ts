@@ -1,7 +1,7 @@
 /**
  * CLI-level tests for `--version` and `--help`: both must short-circuit
  * BEFORE the analysis pipeline, so they answer with zero transcripts and no
- * HOME dependence — that's what a fresh `npx cache-cash --version` on a
+ * HOME dependence — that's what a fresh `npx cache-refund --version` on a
  * random machine looks like. Every HOME here is a fresh empty mkdtempSync
  * dir; these tests never write to HOME, so no settings-seeding helpers or
  * real-home guard are needed (see cli-standalone.test.ts for that

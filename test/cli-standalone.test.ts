@@ -5,7 +5,7 @@
  * reachable only behind main()'s "No transcripts found" pipeline gate.
  *
  * These tests spawn the real compiled `dist/cli.js` binary under a synthetic
- * HOME, covering the exact flow a user's `npx cache-cash enable --yes`
+ * HOME, covering the exact flow a user's `npx cache-refund enable --yes`
  * takes — argv parsing, the early route in main(), consent gating — not
  * just the actions.ts unit surface (test/actions.test.ts covers that).
  *
@@ -39,7 +39,7 @@ const REAL_ACCOUNT_HOME = (() => {
 const tempDirs: string[] = [];
 
 function freshHome(): string {
-  const dir = mkdtempSync(join(tmpdir(), "cachecash-cli-"));
+  const dir = mkdtempSync(join(tmpdir(), "cache-refund-cli-"));
   if (
     dir.length === 0 ||
     (REAL_ACCOUNT_HOME !== null && (dir === REAL_ACCOUNT_HOME || dir.startsWith(REAL_ACCOUNT_HOME + "/")))
@@ -63,10 +63,10 @@ function settingsPath(home: string): string {
   return join(home, ".claude", "settings.json");
 }
 function backupPath(home: string): string {
-  return join(home, ".claude", "settings.json.cache-cash.bak");
+  return join(home, ".claude", "settings.json.cache-refund.bak");
 }
 function baselinePath(home: string): string {
-  return join(home, ".claude", "cache-cash.json");
+  return join(home, ".claude", "cache-refund.json");
 }
 
 function seedSettings(home: string, obj: unknown): void {
@@ -174,6 +174,15 @@ maybe("standalone enable/revert route before the pipeline (no transcripts requir
     const home = freshHome();
 
     const r = runCli(home, ["recheck"]);
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("No transcripts found");
+  });
+
+  it("share is a recognized subcommand (empty HOME -> no-transcripts exit 1, not a usage error)", () => {
+    const home = freshHome();
+
+    const r = runCli(home, ["share"]);
 
     expect(r.status).toBe(1);
     expect(r.stderr).toContain("No transcripts found");

@@ -1,21 +1,21 @@
 ---
-name: cache-cash
+name: cache-refund
 description: >-
   Analyze this machine's Claude Code prompt-cache economy and report what the
   cache saved, what it leaked (attributed to causes), and — for API-billed users
   on the 5-minute default — whether enabling the 1-hour cache TTL would save
   money. Use when the user asks about their Claude Code cache cost, prompt-cache
   savings or waste, cache efficiency, the 1-hour vs 5-minute TTL, whether to set
-  ENABLE_PROMPT_CACHING_1H, "am I leaking money on cache", "run cache-cash", or
+  ENABLE_PROMPT_CACHING_1H, "am I leaking money on cache", "run cache-refund", or
   "is my cache TTL costing me". 100% local — reads token counts and timestamps
   only, never conversation content, no network.
-allowed-tools: Bash(npx cache-cash*)
+allowed-tools: Bash(npx cache-refund*)
 ---
 
-# cache-cash — cache-doctor checkup
+# cache-refund — cache-doctor checkup
 
-You are running the `cache-cash` checkup for the user and narrating it
-conversationally. `cache-cash` is a zero-dependency local CLI that reads Claude
+You are running the `cache-refund` checkup for the user and narrating it
+conversationally. `cache-refund` is a zero-dependency local CLI that reads Claude
 Code transcripts under `~/.claude/projects`, reads **only** the `usage` token
 counts and timestamps (never prompt/response content, no network), and computes
 what the prompt cache saved and leaked.
@@ -25,14 +25,14 @@ what the prompt cache saved and leaked.
 Run:
 
 ```bash
-npx cache-cash --json
+npx cache-refund --json
 ```
 
 This prints a stable JSON summary and **never prompts**. Parse it. If it exits
 non-zero or prints no JSON: exit code `1` = no transcripts found under
 `~/.claude/projects` (tell the user there's nothing to analyze yet); `2` =
-parse/internal error (suggest `npx cache-cash` directly and, if it reproduces, a
-bug report at https://github.com/m8t-labs/cachecash/issues).
+parse/internal error (suggest `npx cache-refund` directly and, if it reproduces, a
+bug report at https://github.com/m8t-labs/cache-refund/issues).
 
 The fields you'll use:
 
@@ -69,7 +69,7 @@ or restate it in your own units. Shape by branch:
 - **api-1h:** "Keeping the 1-hour TTL saves you ~$`{abs(delta1hMinus5m)}`
   `{currency}` vs 5m" (or, if delta ≥ 0, that reverting to 5m would be cheaper).
 - **ambiguous:** say you couldn't auto-detect their billing (subscription vs
-  API/Bedrock/Vertex) and ask which it is, then re-run `npx cache-cash` (the
+  API/Bedrock/Vertex) and ask which it is, then re-run `npx cache-refund` (the
   interactive checkup resolves it).
 
 ## Step 3 — show the gap breakdown in plain words
@@ -98,16 +98,16 @@ below ⇒ 5m is already optimal.
 The tool owns the only write path, with backup + confirmation. If (and only if)
 `branch` is `api-5m` and `delta1hMinus5m` is negative (1h is cheaper), offer:
 
-> "Want to enable the 1-hour TTL? Run `npx cache-cash enable` — it backs up your
+> "Want to enable the 1-hour TTL? Run `npx cache-refund enable` — it backs up your
 > settings, adds `ENABLE_PROMPT_CACHING_1H=1`, and asks before writing. Then
-> start a fresh session and run `npx cache-cash verify` to confirm 1h actually
+> start a fresh session and run `npx cache-refund verify` to confirm 1h actually
 > landed."
 
-For `api-1h` where 5m would be cheaper, point to `npx cache-cash revert` the same
+For `api-1h` where 5m would be cheaper, point to `npx cache-refund revert` the same
 way. For `subscription`, there is nothing to enable — say so.
 
 Do not run `enable`/`revert` on the user's behalf. Surface the command and let
-the user run it. (If they explicitly ask you to run it, run `npx cache-cash
+the user run it. (If they explicitly ask you to run it, run `npx cache-refund
 enable` — the tool's own confirmation prompt is the safeguard — but never edit
 the settings file directly.)
 
@@ -115,19 +115,19 @@ the settings file directly.)
 
 Close with, briefly:
 
-- "Screenshot-friendly version: `npx cache-cash card`. Full receipt: just
-  `npx cache-cash`."
-- "Every number is traceable — `npx cache-cash --explain` shows each formula with
+- "Screenshot-friendly version: `npx cache-refund card`. Full receipt: just
+  `npx cache-refund`."
+- "Every number is traceable — `npx cache-refund --explain` shows each formula with
   your inputs."
-- "If it's useful, a star helps: https://github.com/m8t-labs/cachecash — and share
-  your score with #cachecash."
+- "If it's useful, a star helps: https://github.com/m8t-labs/cache-refund — and share
+  your score with #cacherefund."
 
 ## Guardrails
 
-- 100% local. You are only ever running `npx cache-cash …`. Never read transcript
+- 100% local. You are only ever running `npx cache-refund …`. Never read transcript
   content, never make network calls, never edit settings files directly.
 - Quote the figures from `--json` **verbatim** (as printed). If the user disputes
-  a number, have them run `npx cache-cash --explain` (the derivation) and file a
+  a number, have them run `npx cache-refund --explain` (the derivation) and file a
   wrong-number report — don't re-derive it yourself.
 - Respect `currency`: subscribers get "$-equivalent (API list rates)", never
   "saved $".

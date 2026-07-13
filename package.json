@@ -1,11 +1,8 @@
 {
-  "name": "cache-cash",
-  "version": "1.0.0",
+  "name": "cache-refund",
+  "version": "1.0.5",
   "description": "A cache doctor for Claude Code: find the money your prompt cache is leaking.",
   "type": "module",
-  "bin": {
-    "cache-cash": "dist/cli.js"
-  },
   "files": [
     "dist",
     "README.md",
@@ -36,16 +33,22 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/m8t-labs/cachecash.git"
+    "url": "git+https://github.com/m8t-labs/cache-refund.git"
   },
-  "homepage": "https://github.com/m8t-labs/cachecash#readme",
+  "homepage": "https://github.com/m8t-labs/cache-refund#readme",
   "bugs": {
-    "url": "https://github.com/m8t-labs/cachecash/issues"
+    "url": "https://github.com/m8t-labs/cache-refund/issues"
   },
   "author": "Ilan Bar-Magen",
   "devDependencies": {
     "@types/node": "^20.0.0",
     "typescript": "^5.4.0",
-    "vitest": "^1.6.0"
+    "vitest": "^3.2.7"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "bin": {
+    "cache-refund": "dist/cli.js"
   }
 }

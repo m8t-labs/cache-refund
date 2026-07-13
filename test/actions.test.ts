@@ -90,7 +90,7 @@ const tempDirs: string[] = [];
 
 /** A fresh synthetic HOME for one test. Asserts it is not the real home. */
 function freshHome(): string {
-  const dir = mkdtempSync(join(tmpdir(), "cachecash-actions-"));
+  const dir = mkdtempSync(join(tmpdir(), "cache-refund-actions-"));
   const unsafe =
     dir.length === 0 ||
     (REAL_ACCOUNT_HOME !== null && (dir === REAL_ACCOUNT_HOME || dir.startsWith(REAL_ACCOUNT_HOME + "/")));
@@ -106,11 +106,11 @@ function settingsPath(home: string): string {
 }
 
 function backupPath(home: string): string {
-  return join(home, ".claude", "settings.json.cache-cash.bak");
+  return join(home, ".claude", "settings.json.cache-refund.bak");
 }
 
 function baselinePath(home: string): string {
-  return join(home, ".claude", "cache-cash.json");
+  return join(home, ".claude", "cache-refund.json");
 }
 
 function writeSettings(home: string, obj: unknown): void {
@@ -286,7 +286,7 @@ describe("applyEnable", () => {
     applyEnable({ home });
 
     const entries = readdirSync(join(home, ".claude"));
-    const strays = entries.filter((e) => e.includes(".cache-cash.tmp."));
+    const strays = entries.filter((e) => e.includes(".cache-refund.tmp."));
     expect(strays).toEqual([]);
     // And the final file is valid, complete JSON (the point of atomicity: a
     // reader never sees a half-written file).
