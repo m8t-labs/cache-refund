@@ -44,7 +44,8 @@
   },
   "author": "m8t labs",
   "contributors": [
-    "Ilan Bar-Magen"
+    "Ilan Bar-Magen",
+    "Or Keren"
   ],
   "devDependencies": {
     "@types/node": "^20.0.0",
