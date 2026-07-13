@@ -117,9 +117,9 @@ Initial public release.
 - Actions: `enable` / `revert` (confirmed, backup-first settings edit),
   `verify`, `recheck` (savings receipts against a baseline saved at enable).
 - Output modes: `card`, `--md`, `--compact`, `--explain`, `--json`.
-- Claude Code plugin/skill (`/plugin marketplace add m8t-labs/cache-refund`).
+- Claude Code plugin/skill (`/plugin marketplace add cache-refund/cache-refund`).
 - 100% local: token counts and timestamps only, no conversation content,
   no network, zero runtime dependencies.
 
-[Unreleased]: https://github.com/m8t-labs/cache-refund/compare/v1.0.0...HEAD
-[1.0.0]: https://github.com/m8t-labs/cache-refund/releases/tag/v1.0.0
+[Unreleased]: https://github.com/cache-refund/cache-refund/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/cache-refund/cache-refund/releases/tag/v1.0.0

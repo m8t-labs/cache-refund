@@ -33,11 +33,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/m8t-labs/cache-refund.git"
+    "url": "git+https://github.com/cache-refund/cache-refund.git"
   },
-  "homepage": "https://github.com/m8t-labs/cache-refund#readme",
+  "homepage": "https://github.com/cache-refund/cache-refund#readme",
   "bugs": {
-    "url": "https://github.com/m8t-labs/cache-refund/issues"
+    "url": "https://github.com/cache-refund/cache-refund/issues"
   },
   "author": "Ilan Bar-Magen",
   "devDependencies": {

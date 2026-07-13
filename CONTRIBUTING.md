@@ -8,7 +8,7 @@ changes is "does it make a number more correct, more honest, or more useful."
 A wrong number in public is the worst thing that can happen to a tool whose
 entire pitch is "trust this math." So **a report that `cache-refund` printed a
 figure that doesn't match reality jumps the queue.** Open a
-[wrong-number issue](https://github.com/m8t-labs/cache-refund/issues/new?template=wrong-number.yml);
+[wrong-number issue](https://github.com/cache-refund/cache-refund/issues/new?template=wrong-number.yml);
 it asks for your `--json` and `--explain` output so the exact figure can be
 reproduced and traced through the formula. Those outputs contain **token counts
 and timestamps only — no conversation content** (that is the whole privacy model;
@@ -18,7 +18,7 @@ ask for a minimal *synthetic* fixture, never your real prompts.
 ## Dev setup
 
 ```bash
-git clone https://github.com/m8t-labs/cache-refund
+git clone https://github.com/cache-refund/cache-refund
 cd cache-refund
 npm install          # devDependencies only — see the zero-dep rule below
 npm run build        # tsc -> dist/

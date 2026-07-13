@@ -1,6 +1,6 @@
 # cache-refund
 
-[![CI](https://github.com/m8t-labs/cache-refund/actions/workflows/ci.yml/badge.svg)](https://github.com/m8t-labs/cache-refund/actions/workflows/ci.yml)
+[![CI](https://github.com/cache-refund/cache-refund/actions/workflows/ci.yml/badge.svg)](https://github.com/cache-refund/cache-refund/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/cache-refund.svg)](https://www.npmjs.com/package/cache-refund)
 ![node](https://img.shields.io/badge/node-%E2%89%A518-success)
 ![dependencies](https://img.shields.io/badge/dependencies-0-success)
@@ -121,7 +121,7 @@ regression *watchdog* (below) is the roadmap's flagship.
 conversationally instead of from a terminal:
 
 ```
-/plugin marketplace add m8t-labs/cache-refund
+/plugin marketplace add cache-refund/cache-refund
 ```
 
 Then just ask — "am I leaking money on cache?" or "run cache-refund" — and the
@@ -136,7 +136,7 @@ tool's own confirmation prompt is the only write path, same as the CLI.
 npx cache-refund card
 ```
 
-Post it with #cacherefund, or drop it in [the pinned Discussion](https://github.com/m8t-labs/cache-refund/discussions/4).
+Post it with #cacherefund, or drop it in [the pinned Discussion](https://github.com/cache-refund/cache-refund/discussions/4).
 
 ## Other output modes
 
@@ -202,7 +202,7 @@ appears at the end of every interactive run; Enter skips it, and `--no-share`
 
 **I think a number is wrong.**
 That is the highest-priority kind of bug report. Open a
-[wrong-number issue](https://github.com/m8t-labs/cache-refund/issues/new?template=wrong-number.yml)
+[wrong-number issue](https://github.com/cache-refund/cache-refund/issues/new?template=wrong-number.yml)
 — it asks for your `--json` and `--explain` output (token counts and timestamps
 only, no content) so the exact figure can be reproduced and traced through the
 formula.

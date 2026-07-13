@@ -4,7 +4,7 @@ name: release
 # (workflow_dispatch) or by a CD caller (workflow_call). OIDC trusted
 # publishing: no NPM_TOKEN. One-time seed before OIDC works: publish once
 # manually, then on npmjs.com → package → Settings → Trusted Publisher →
-# GitHub Actions → m8t-labs/cache-refund, workflow release.yml.
+# GitHub Actions → cache-refund/cache-refund, workflow release.yml.
 on:
   workflow_dispatch:
     inputs:

@@ -1,8 +1,8 @@
 blank_issues_enabled: true
 contact_links:
   - name: Share your score
-    url: https://github.com/m8t-labs/cache-refund/discussions
+    url: https://github.com/cache-refund/cache-refund/discussions
     about: "Screenshot of your `card` or `--compact`? Post it in Discussions with #cacherefund."
   - name: Methodology & formulas
-    url: https://github.com/m8t-labs/cache-refund/blob/main/METHODOLOGY.md
+    url: https://github.com/cache-refund/cache-refund/blob/main/METHODOLOGY.md
     about: "Before filing a wrong-number report, `npx cache-refund --explain` shows every formula with your own numbers."

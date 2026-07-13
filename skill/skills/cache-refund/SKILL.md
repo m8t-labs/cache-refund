@@ -32,7 +32,7 @@ This prints a stable JSON summary and **never prompts**. Parse it. If it exits
 non-zero or prints no JSON: exit code `1` = no transcripts found under
 `~/.claude/projects` (tell the user there's nothing to analyze yet); `2` =
 parse/internal error (suggest `npx cache-refund` directly and, if it reproduces, a
-bug report at https://github.com/m8t-labs/cache-refund/issues).
+bug report at https://github.com/cache-refund/cache-refund/issues).
 
 The fields you'll use:
 
@@ -119,7 +119,7 @@ Close with, briefly:
   `npx cache-refund`."
 - "Every number is traceable — `npx cache-refund --explain` shows each formula with
   your inputs."
-- "If it's useful, a star helps: https://github.com/m8t-labs/cache-refund — and share
+- "If it's useful, a star helps: https://github.com/cache-refund/cache-refund — and share
   your score with #cacherefund."
 
 ## Guardrails

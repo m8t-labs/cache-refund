@@ -13,8 +13,8 @@
       "author": {
         "name": "Ilan Bar-Magen"
       },
-      "homepage": "https://github.com/m8t-labs/cache-refund",
-      "repository": "https://github.com/m8t-labs/cache-refund",
+      "homepage": "https://github.com/cache-refund/cache-refund",
+      "repository": "https://github.com/cache-refund/cache-refund",
       "license": "MIT",
       "keywords": ["claude-code", "prompt-cache", "cost", "ttl", "cache"]
     }
