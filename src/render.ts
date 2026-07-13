@@ -212,7 +212,7 @@ export function makeScanProgress(pun: string, ink: Ink, sym: Sym): ScanProgress 
       lastPct = pct;
       // Before discovery reports a total (the initial frame), show no counts
       // rather than a made-up "0/1".
-      const counts = total > 0 ? `${done.toLocaleString()}/${total.toLocaleString()} sessions (${pct}%)` : "sessions…";
+      const counts = total > 0 ? `${done.toLocaleString("en-US")}/${total.toLocaleString("en-US")} sessions (${pct}%)` : "sessions…";
       const line = ink.dim(`  scanning ${counts} ${sym.dash} ${pun}`);
       const visLen = stripAnsi(line).length;
       const pad = Math.max(0, maxLen - visLen);
@@ -233,7 +233,7 @@ export function checkupLines(s: Summary, ink: Ink, sym: Sym): string[] {
   const windowLabel = w.mode === "all-time" ? "all-time" : `last ${w.days} days`;
   const lines: string[] = [];
   lines.push(ink.bold("CHECKUP"));
-  lines.push(`  ${ink.green(sym.check)} scanned ${s.scope.sessions.toLocaleString()} sessions, ${s.scope.turns.toLocaleString()} turns (${windowLabel})`);
+  lines.push(`  ${ink.green(sym.check)} scanned ${s.scope.sessions.toLocaleString("en-US")} sessions, ${s.scope.turns.toLocaleString("en-US")} turns (${windowLabel})`);
   lines.push(`  ${ink.green(sym.check)} TTL received (last ${s.ttlRealityCheck.windowDays}d): ${s.ttlRealityCheck.received}${s.ttlRealityCheck.regime !== "none" ? ` ${sym.check}` : ""}`);
   const leakWarn = s.leaks.find((l) => !l.informational && l.dollars > 0);
   if (leakWarn) {
@@ -268,7 +268,7 @@ const BOX_FRAME = (ink: Ink) => ({ brand: BRAND, tint: ink.brand });
  */
 function scaleLine(s: Summary, sym: Sym): string {
   const total = s.tokens.creationTotal + s.tokens.readTotal;
-  return `${fmtTokensCompact(total)} tokens ${sym.dot} ${s.scope.sessions.toLocaleString()} sessions`;
+  return `${fmtTokensCompact(total)} tokens ${sym.dot} ${s.scope.sessions.toLocaleString("en-US")} sessions`;
 }
 
 /**
@@ -443,7 +443,7 @@ export function wrappedLines(s: Summary, ink: Ink, sym: Sym, showProjects = fals
   if (w.peakHourTurns > 0) {
     cands.push({
       extremity: w.peakHourTurns * 10,
-      text: `Your peak hour is ${String(w.peakHour).padStart(2, "0")}:00 ${sym.dash} ${w.peakHourTurns.toLocaleString()} turns, more than any other hour.`,
+      text: `Your peak hour is ${String(w.peakHour).padStart(2, "0")}:00 ${sym.dash} ${w.peakHourTurns.toLocaleString("en-US")} turns, more than any other hour.`,
     });
   }
   if (w.biggestSessionCreation > 0) {
@@ -874,7 +874,7 @@ export function shareTemplate(s: Summary, context: "checkup" | "post-enable" | "
   const cf = s.counterfactual;
   const score = s.efficiencyScore.toFixed(1);
   const tokens = fmtTokensCompact(s.tokens.creationTotal + s.tokens.readTotal);
-  const sessions = s.scope.sessions.toLocaleString();
+  const sessions = s.scope.sessions.toLocaleString("en-US");
 
   // The just-claimed moments get the t-shirt-meme humblebrag: the person who
   // flipped the flag deserves the enterprise flex. delta30d = the monthly
@@ -1025,7 +1025,7 @@ export function renderMarkdown(s: Summary): string {
   // keep this function's own output byte-identical across refactors.
   lines.push(`**Score:** ${s.efficiencyScore.toFixed(1)} / 100 — ${scoreLabel(s.efficiencyScore, makeSym(false), kind)}`);
   lines.push("");
-  lines.push(`- Window: ${s.window.mode === "all-time" ? "all-time" : `last ${s.window.days} days`} (${s.scope.sessions.toLocaleString()} sessions, ${s.scope.turns.toLocaleString()} turns)`);
+  lines.push(`- Window: ${s.window.mode === "all-time" ? "all-time" : `last ${s.window.days} days`} (${s.scope.sessions.toLocaleString("en-US")} sessions, ${s.scope.turns.toLocaleString("en-US")} turns)`);
   lines.push(`- TTL received (last ${s.ttlRealityCheck.windowDays}d): ${s.ttlRealityCheck.received}`);
   lines.push(`- Recoverable ratio: ${fmtPct(s.recoverableRatio)} (break-even ${fmtPct(s.threshold)})`);
   lines.push("");
