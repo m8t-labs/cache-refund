@@ -34,8 +34,10 @@
  * process.stdout.isTTY themselves.
  */
 
+import { realpathSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { homedir } from "node:os";
+import { pathToFileURL } from "node:url";
 import { run } from "./pipeline.js";
 import { parsePriceOverride } from "./pricing.js";
 import { applyEnable, applyRevert, runRecheck, runVerify } from "./actions.js";
@@ -716,9 +718,29 @@ async function maybeConsentFromEnding(
   return 0;
 }
 
-main()
-  .then((code) => process.exit(code))
-  .catch((err) => {
-    process.stderr.write(`cache-refund: ${err instanceof Error ? err.stack ?? err.message : String(err)}\n`);
-    process.exit(2);
-  });
+// ------------------------------------------------------------- entrypoint
+// Run only when executed directly (`node dist/cli.js`, the npm bin shim,
+// `npx cache-refund`) — never on import, so tests can reach the interactive
+// code paths without spawning the CLI as a side effect. The realpath step is
+// load-bearing: the npm bin entry is a symlink to dist/cli.js, and node
+// resolves the main module's import.meta.url through symlinks, so comparing
+// against a realpath'd argv[1] keeps the shim matching. If realpath fails
+// (argv[1] missing or unreadable), fall back to the raw path comparison.
+const entryHref = (() => {
+  const argv1 = process.argv[1];
+  if (!argv1) return null;
+  try {
+    return pathToFileURL(realpathSync(argv1)).href;
+  } catch {
+    return pathToFileURL(argv1).href;
+  }
+})();
+
+if (entryHref === import.meta.url) {
+  main()
+    .then((code) => process.exit(code))
+    .catch((err) => {
+      process.stderr.write(`cache-refund: ${err instanceof Error ? err.stack ?? err.message : String(err)}\n`);
+      process.exit(2);
+    });
+}
