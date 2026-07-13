@@ -5,6 +5,8 @@
   "type": "module",
   "files": [
     "dist",
+    "assets/card-api.png",
+    "assets/card-subscription.svg",
     "README.md",
     "METHODOLOGY.md",
     "LICENSE"

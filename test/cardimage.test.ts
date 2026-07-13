@@ -94,6 +94,12 @@ const PAGE_BG: [number, number, number, number] = [0x0f, 0x10, 0x16, 255];
 const WHITE: [number, number, number, number] = [255, 255, 255, 255];
 
 describe("buildCardSvg (v1.0.5: content-sized terminal-replica card)", () => {
+  it("presents the card as the normal cache-refund run, not the card subcommand", () => {
+    const svg = buildCardSvg(fixtureEndingCReceipt);
+    expect(svg).toContain(">npx cache-refund</tspan>");
+    expect(svg).not.toContain("npx cache-refund card");
+  });
+
   it("is well-formed XML: single svg root, balanced text/tspan tags, no raw ampersands", () => {
     for (const s of ENDINGS) {
       const svg = buildCardSvg(s);

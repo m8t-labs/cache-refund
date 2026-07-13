@@ -273,7 +273,7 @@ function buildCard(s: Summary, planPrice?: number, planName?: string): BuiltCard
     .filter((l) => l.length > 0)
     .join("\n  ");
 
-  const promptSvg = `<text x="${TEXT_LEFT}" y="${contentTop + promptYRel + ROW_H / 2 + 5}" class="t dim" font-size="${FONT}">${escapeXml("$ ")}<tspan class="t txt">${escapeXml("npx cache-refund card")}</tspan></text>`;
+  const promptSvg = `<text x="${TEXT_LEFT}" y="${contentTop + promptYRel + ROW_H / 2 + 5}" class="t dim" font-size="${FONT}">${escapeXml("$ ")}<tspan class="t txt">${escapeXml("npx cache-refund")}</tspan></text>`;
 
   const factSvg = factRows
     .map((row, index) => {

@@ -8,7 +8,7 @@
 
 **Finds the money your Claude Code cache is leaking.**
 
-![cache-refund receipt card](./assets/card.svg)
+![cache-refund API savings card](./assets/card-api.png)
 
 ## How to run
 
@@ -171,6 +171,8 @@ and reproducible*, but it is not a bill. When Claude Code's local account cache
 contains a recognized Max tier, `cache-refund` reads only the billing/tier fields
 (never name, email, or account IDs) and shows the known plan framing. Unknown or
 stale tiers stay price-free. `--plan <usd>` remains a manual override.
+
+![cache-refund subscription receipt card](./assets/card-subscription.svg)
 
 **Does it work on Bedrock / Vertex?**
 Yes. `ENABLE_PROMPT_CACHING_1H` is an API/Bedrock/Vertex/Foundry feature, so the
