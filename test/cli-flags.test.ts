@@ -14,7 +14,7 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -100,6 +100,32 @@ function runCli(home: string, args: string[]): { status: number | null; stdout: 
 }
 
 const maybe = existsSync(CLI) ? describe : describe.skip;
+
+maybe("configured 1h delivery regression", () => {
+  it("does not offer or re-apply 1h when the flag is already set but transcripts received 5m", () => {
+    const home = freshHome();
+    seedTranscript(home);
+    const claudeDir = join(home, ".claude");
+    const settingsPath = join(claudeDir, "settings.json");
+    const settings = {
+      env: {
+        ANTHROPIC_API_KEY: "synthetic-test-key",
+        ENABLE_PROMPT_CACHING_1H: "1",
+      },
+    };
+    writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n", "utf8");
+    const before = readFileSync(settingsPath, "utf8");
+
+    const r = runCli(home, []);
+
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain("1H IS SET, BUT 5M WAS RECEIVED");
+    expect(r.stdout).toContain("npx cache-refund verify");
+    expect(r.stdout).not.toContain("Switch to the 1-hour cache");
+    expect(r.stdout).not.toContain("pass --yes to apply");
+    expect(readFileSync(settingsPath, "utf8")).toBe(before);
+  });
+});
 
 maybe("--branch-override (hidden dev flag): forces the branch, --json reflects it", () => {
   it("sanity: without the override, this synthetic corpus is honestly ambiguous in --json", () => {

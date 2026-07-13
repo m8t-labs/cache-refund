@@ -60,7 +60,7 @@ import {
   wrapLine,
 } from "./format.js";
 
-export type EndingKind = "A-enable" | "A-revert" | "B" | "C";
+export type EndingKind = "A-enable" | "A-revert" | "B" | "C" | "D-delivery";
 
 export interface RenderOptions {
   /** TTY-ness, decided once by cli.ts (non-TTY => plain everything). */
@@ -150,6 +150,7 @@ function fmtDollarsEq(s: Summary, n: number, decimals = 2): string {
  */
 export function decideEnding(s: Summary): EndingKind {
   if (s.branch === "subscription") return "C";
+  if (s.branch === "api-1h" && s.ttlRealityCheck.regime === "5m") return "D-delivery";
   if (s.branch === "api-5m") {
     return s.counterfactual.delta1hMinus5m < 0 ? "A-enable" : "B";
   }
@@ -288,6 +289,21 @@ export function numberBox(s: Summary, ink: Ink, sym: Sym, planPrice?: number, pl
     return full.length <= 12 ? full : fmtDollarsCompact(value);
   };
 
+  if (kind === "D-delivery") {
+    return box(
+      [
+        { text: "" },
+        { text: ink.yellow(ink.bold("1H IS SET, BUT 5M WAS RECEIVED")) },
+        { text: "" },
+        { text: "Your setting is already correct." },
+        { text: ink.dim("Start a fresh session, then verify delivery.") },
+        { text: "" },
+      ],
+      sym.ascii,
+      BOX_FRAME(ink),
+    );
+  }
+
   if (kind === "C") {
     const oneHourAhead = s.counterfactual.cost5m > s.counterfactual.actualCost;
     const denominator = Math.max(oneHourAhead ? s.counterfactual.cost5m : s.counterfactual.actualCost, 1);
@@ -388,6 +404,9 @@ export function verdictLine(s: Summary, ink: Ink, sym: Sym): string {
   const cf = s.counterfactual;
   if (s.branch === "subscription") {
     return ink.bold(`R/C = ${pctR} recoverable (break-even ${pctThresh}) ${sym.dash} 1h is already yours ${sym.check}`);
+  }
+  if (decideEnding(s) === "D-delivery") {
+    return ink.bold(`1h configured ${sym.check} ${sym.dash} recent transcripts still received 5m`);
   }
   if (cf.delta1hMinus5m < 0) {
     return ink.bold(
@@ -524,7 +543,24 @@ export function renderEnding(s: Summary, kind: EndingKind, ink: Ink, sym: Sym, p
       return endingCertified(s, ink, sym);
     case "C":
       return endingReceipt(s, ink, sym, planPrice);
+    case "D-delivery":
+      return endingDeliveryWarning(s, ink, sym);
   }
+}
+
+function endingDeliveryWarning(s: Summary, ink: Ink, sym: Sym): EndingRender {
+  const lines = [
+    ink.yellow(ink.bold("TTL DELIVERY WARNING")),
+    "",
+    ...wrapTerm(
+      `Your settings already request the 1-hour cache, but transcripts from the last ${s.ttlRealityCheck.windowDays} days were billed at 5m. Do not enable it again.`,
+    ),
+    "",
+    ...wrapTerm(`Start a fresh Claude Code session, use it for a few turns, then run ${sym.dash}`),
+    "",
+    ink.bold("  npx cache-refund verify"),
+  ];
+  return { lines, needsConsent: false };
 }
 
 function endingEnable(s: Summary, ink: Ink, sym: Sym): EndingRender {
@@ -904,6 +940,11 @@ export function shareTemplate(s: Summary, context: "checkup" | "post-enable" | "
       `Ran cache-refund expecting bad news — CERTIFIED OPTIMAL ${score}/100. ` +
       `${setting} is actually right for how I work${scaleClause}. ` +
       SHARE_CTA_TAIL;
+  } else if (kind === "D-delivery") {
+    scaleClause = "";
+    full =
+      `My 1-hour cache setting is enabled, but recent Claude Code transcripts still received 5m. ` +
+      `Starting a fresh session and verifying delivery. ${SHARE_CTA_TAIL}`;
   } else {
     const pct = billSharePct(cf.delta1hMinus5m, cf.cost5m);
     scaleClause = `, across ${tokens} tokens · ${sessions} sessions`;
@@ -1049,6 +1090,8 @@ export function renderMarkdown(s: Summary): string {
     lines.push(`**Verdict:** 5m would cost ~${fmtDollars(Math.abs(cf.delta30d))}/30d less for this pattern. Run \`npx cache-refund revert\` to apply.`);
   } else if (kind === "B") {
     lines.push(`**Verdict:** certified optimal ✓ — you're on the cheaper TTL for your pattern.`);
+  } else if (kind === "D-delivery") {
+    lines.push("**Verdict:** 1h is already configured, but recent transcripts received 5m. Start a fresh session and run `npx cache-refund verify`; do not enable it again.");
   } else {
     // Mirrors the receipt's ordering: the 1h-vs-5m counterfactual leads the
     // verdict; vs-uncached follows on its own line.

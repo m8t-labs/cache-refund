@@ -36,4 +36,15 @@ describe("detectBranch subscription precedence", () => {
 
     expect(result.branch).toBe("api-1h");
   });
+
+  it("configured 1h stays api-1h when recent transcripts are still receiving 5m", () => {
+    const result = detectBranch(
+      { ...baseHints, enable1h: true, hasApiKey: true },
+      "5m",
+      false,
+    );
+
+    expect(result.branch).toBe("api-1h");
+    expect(result.evidence).toContain("=> API-billed, configured for 1h but receiving 5m");
+  });
 });

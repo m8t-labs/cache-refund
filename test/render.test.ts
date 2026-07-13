@@ -52,6 +52,20 @@ describe("ending decision logic", () => {
   it("subscription -> C always", () => {
     expect(decideEnding(fixtureEndingCReceipt)).toBe("C");
   });
+  it("configured 1h but received 5m -> delivery warning, never enable", () => {
+    const summary = {
+      ...fixtureEndingAEnable,
+      branch: "api-1h" as const,
+    };
+    expect(decideEnding(summary)).toBe("D-delivery");
+    const ending = renderEnding(summary, "D-delivery", makeInk(false), makeSym(true));
+    const text = stripAnsi(ending.lines.join("\n"));
+    expect(ending.needsConsent).toBe(false);
+    expect(text).toContain("TTL DELIVERY WARNING");
+    expect(text).toContain("Start a fresh Claude Code session");
+    expect(text).toContain("cache-refund verify");
+    expect(text).not.toContain("Switch to the 1-hour cache");
+  });
 });
 
 describe("score box width law (<=57 cols)", () => {
@@ -299,7 +313,11 @@ describe("outcome box is ending-aware", () => {
   });
 
   it("API 1h optimal card calls 5m the comparison, not the better option", () => {
-    const summary = { ...fixtureEndingAEnable, branch: "api-1h" as const };
+    const summary = {
+      ...fixtureEndingAEnable,
+      branch: "api-1h" as const,
+      ttlRealityCheck: { ...fixtureEndingAEnable.ttlRealityCheck, regime: "1h" as const, received: "1h" },
+    };
     const rendered = stripAnsi(numberBox(summary, makeInk(false), makeSym(true)));
     expect(rendered).toContain("SAVE ~$80.00 / MONTH");
     expect(rendered).toContain("1H CACHE COSTS 32% LESS THAN 5M");
@@ -522,6 +540,17 @@ describe("share templates (v1.0.2: plain English, percentage framing)", () => {
     expect(t).toContain("frees ~14% of my Claude Code usage limit");
     expect(t).toContain("≈$2,500.95 of API-value over the last 90 days");
     expect(t).toMatch(/across [\d.]+B tokens · 590 sessions/);
+    expect(t.length).toBeLessThanOrEqual(280);
+  });
+  it("delivery warning: configured 1h + received 5m + verification, under 280 chars", () => {
+    const summary = { ...fixtureEndingAEnable, branch: "api-1h" as const };
+    const t = shareTemplate(summary);
+    expect(decideEnding(summary)).toBe("D-delivery");
+    expect(t).toContain("1-hour cache setting is enabled");
+    expect(t).toContain("still received 5m");
+    expect(t).toContain("fresh session and verifying delivery");
+    expect(t).not.toContain("usage limit");
+    expect(t).not.toContain("subscription");
     expect(t.length).toBeLessThanOrEqual(280);
   });
   it("no jargon in any ending: no '-eq', no 'world'; every pct sane 1-99", () => {

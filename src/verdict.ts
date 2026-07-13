@@ -101,13 +101,21 @@ export function detectBranch(hints: EnvHints, regime: Regime, jsonMode: boolean)
 
   // Explicit API-provider signal => an API branch. Regime picks 5m vs 1h.
   if (apiProvider) {
-    if (hints.force5m || regime === "5m") {
+    if (hints.force5m) {
       ev.push("=> API-billed, receiving 5m");
       return { branch: "api-5m", evidence: ev };
     }
-    if (hints.enable1h || regime === "1h") {
+    if (hints.enable1h) {
+      ev.push(regime === "5m" ? "=> API-billed, configured for 1h but receiving 5m" : "=> API-billed, receiving 1h (opted in)");
+      return { branch: "api-1h", evidence: ev };
+    }
+    if (regime === "1h") {
       ev.push("=> API-billed, receiving 1h (opted in)");
       return { branch: "api-1h", evidence: ev };
+    }
+    if (regime === "5m") {
+      ev.push("=> API-billed, receiving 5m");
+      return { branch: "api-5m", evidence: ev };
     }
     // API but no cache activity: ambiguous which TTL.
     ev.push("=> API-billed, TTL undetermined");
